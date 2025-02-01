@@ -1,0 +1,19 @@
+default:
+  push_kubernetes: false
+  push_images: false
+
+register:
+  target:
+    username: test
+    password: test
+    registry: harbor.cloud.pixiuio.com
+  source:
+    username: test
+    password: test
+    registry: harbor.cloud.pixiuio.com
+
+kubernetes:
+  version: v1.23.6
+
+images:
+  - docker.io/nginx:latest
