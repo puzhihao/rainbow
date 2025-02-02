@@ -12,18 +12,15 @@ import (
 
 	"k8s.io/klog/v2"
 
+	"github.com/caoyingjunz/rainbow/api/server/router"
 	"github.com/caoyingjunz/rainbow/cmd/app/options"
-)
-
-var (
-	filePath = flag.String("configFile", "./config.yaml", "config file")
 )
 
 func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
 
-	opts, err := options.NewOptions(*filePath)
+	opts, err := options.NewServerOptions(*filePath)
 	if err != nil {
 		klog.Fatal(err)
 	}
@@ -36,12 +33,8 @@ func main() {
 		Handler: opts.HttpEngine,
 	}
 
-	runers := []func(context.Context, int) error{opts.Controller.Agent().Run}
-	for _, runner := range runers {
-		if err := runner(context.TODO(), 5); err != nil {
-			klog.Fatal("failed to start manager: ", err)
-		}
-	}
+	// 安装 http 路由
+	router.InstallRouters(opts)
 
 	go func() {
 		err = srv.ListenAndServe()
@@ -59,7 +52,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err = srv.Shutdown(ctx); err != nil {
 		klog.Fatalf("rainbow agent forced to shutdown: %v", err)
 	}
 }

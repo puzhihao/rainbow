@@ -6,7 +6,8 @@ import (
 )
 
 type RainbowInterface interface {
-	rainbow.RainbowAgentGetter
+	rainbow.AgentGetter
+	rainbow.ServerGetter
 }
 
 type rain struct {
@@ -14,8 +15,12 @@ type rain struct {
 	name    string
 }
 
-func (p *rain) RainbowAgent() rainbow.Interface {
-	return rainbow.NewRainbowAgent(p.factory, p.name)
+func (p *rain) Agent() rainbow.Interface {
+	return rainbow.NewAgent(p.factory, p.name)
+}
+
+func (p *rain) Server() rainbow.ServerInterface {
+	return rainbow.NewServer(p.factory)
 }
 
 func New(name string, f db.ShareDaoFactory) RainbowInterface {
