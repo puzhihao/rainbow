@@ -38,8 +38,8 @@ func main() {
 
 	runers := []func(context.Context, int) error{opts.Controller.Agent().Run}
 	for _, runner := range runers {
-		if err := runner(context.TODO(), 5); err != nil {
-			klog.Fatal("failed to start manager: ", err)
+		if err = runner(context.TODO(), 5); err != nil {
+			klog.Fatal("failed to rainbow agent: ", err)
 		}
 	}
 
