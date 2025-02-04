@@ -3,14 +3,18 @@ package rainbow
 import (
 	"context"
 	"fmt"
-	"k8s.io/klog/v2"
+	"path/filepath"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 
 	"github.com/caoyingjunz/rainbow/pkg/db"
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
+	"github.com/caoyingjunz/rainbow/pkg/template"
+	"github.com/caoyingjunz/rainbow/pkg/util"
 )
 
 type AgentGetter interface {
@@ -22,15 +26,18 @@ type Interface interface {
 
 type AgentController struct {
 	factory db.ShareDaoFactory
-	name    string
 	queue   workqueue.RateLimitingInterface
+
+	name     string
+	callback string
 }
 
-func NewAgent(f db.ShareDaoFactory, name string) *AgentController {
+func NewAgent(f db.ShareDaoFactory, name string, callback string) *AgentController {
 	return &AgentController{
-		factory: f,
-		name:    name,
-		queue:   workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "rainbow-agent"),
+		factory:  f,
+		name:     name,
+		callback: callback,
+		queue:    workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "rainbow-agent"),
 	}
 }
 
@@ -92,10 +99,66 @@ func (s *AgentController) sync(ctx context.Context, taskId int64) error {
 	if err != nil {
 		return fmt.Errorf("failted to get task %d %v", taskId, err)
 	}
+	registry, err := s.factory.Registry().Get(ctx, task.RegisterId)
+	if err != nil {
+		return fmt.Errorf("failed to get registry %v", err)
+	}
+	images, err := s.factory.Image().ListWithTask(ctx, taskId)
+	if err != nil {
+		return fmt.Errorf("failed to get images %v", err)
+	}
+	var img []string
+	for _, image := range images {
+		img = append(img, image.Name)
+	}
 
-	fmt.Println("task:", task)
+	tplCfg := template.PluginTemplateConfig{
+		Default: template.DefaultOption{
+			PushImages: true,
+		},
+		Plugin: template.PluginOption{
+			Callback: s.callback,
+		},
+		Register: template.Register{
+			Repository: registry.Repository,
+			Namespace:  registry.Namespace,
+			Username:   registry.Username,
+			Password:   registry.Password,
+		},
+		Images: img,
+	}
+
+	cfg, err := yaml.Marshal(tplCfg)
+	if err != nil {
+		return err
+	}
+
+	taskIdStr := fmt.Sprintf("%d", taskId)
+
+	destDir := filepath.Join(baseDir, taskIdStr)
+	if err = util.EnsureDirectoryExists(destDir); err != nil {
+		return err
+	}
+	if !util.IsDirectoryExists(destDir + "/plugin") {
+		if err = util.Copy(pluginProject, destDir); err != nil {
+			return err
+		}
+	}
+	if err = util.WriteIntoFile(string(cfg), destDir+"/plugin/config.yaml"); err != nil {
+		return err
+	}
+
+	git := util.NewGit(destDir+"/plugin", taskIdStr, taskIdStr)
+	if err = git.Push(); err != nil {
+		return err
+	}
 	return nil
 }
+
+const (
+	baseDir       = "/tmp"
+	pluginProject = baseDir + "/plugin"
+)
 
 // TODO
 func (s *AgentController) handleErr(ctx context.Context, err error, key interface{}) {
