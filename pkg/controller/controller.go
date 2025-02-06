@@ -1,6 +1,7 @@
 package controller
 
 import (
+	rainbowconfig "github.com/caoyingjunz/rainbow/cmd/app/config"
 	"github.com/caoyingjunz/rainbow/pkg/controller/rainbow"
 	"github.com/caoyingjunz/rainbow/pkg/db"
 )
@@ -11,23 +12,21 @@ type RainbowInterface interface {
 }
 
 type rain struct {
-	factory  db.ShareDaoFactory
-	name     string
-	callback string
+	factory db.ShareDaoFactory
+	cfg     rainbowconfig.Config
 }
 
 func (p *rain) Agent() rainbow.Interface {
-	return rainbow.NewAgent(p.factory, p.name, p.callback)
+	return rainbow.NewAgent(p.factory, p.cfg)
 }
 
 func (p *rain) Server() rainbow.ServerInterface {
 	return rainbow.NewServer(p.factory)
 }
 
-func New(name string, callback string, f db.ShareDaoFactory) RainbowInterface {
+func New(cfg rainbowconfig.Config, f db.ShareDaoFactory) RainbowInterface {
 	return &rain{
-		factory:  f,
-		name:     name,
-		callback: callback,
+		factory: f,
+		cfg:     cfg,
 	}
 }

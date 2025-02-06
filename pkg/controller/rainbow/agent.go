@@ -13,6 +13,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/caoyingjunz/pixiulib/strutil"
+	rainbowconfig "github.com/caoyingjunz/rainbow/cmd/app/config"
 	"github.com/caoyingjunz/rainbow/pkg/db"
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
 	"github.com/caoyingjunz/rainbow/pkg/template"
@@ -29,17 +30,22 @@ type Interface interface {
 
 type AgentController struct {
 	factory db.ShareDaoFactory
-	queue   workqueue.RateLimitingInterface
+	cfg     rainbowconfig.Config
+
+	queue workqueue.RateLimitingInterface
 
 	name     string
 	callback string
+	baseDir  string
 }
 
-func NewAgent(f db.ShareDaoFactory, name string, callback string) *AgentController {
+func NewAgent(f db.ShareDaoFactory, cfg rainbowconfig.Config) *AgentController {
 	return &AgentController{
 		factory:  f,
-		name:     name,
-		callback: callback,
+		cfg:      cfg,
+		name:     cfg.Agent.Name,
+		baseDir:  cfg.Agent.DataDir,
+		callback: cfg.Plugin.Callback,
 		queue:    workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "rainbow-agent"),
 	}
 }
@@ -151,12 +157,12 @@ func (s *AgentController) sync(ctx context.Context, taskId int64, resourceVersio
 
 	taskIdStr := fmt.Sprintf("%d", taskId)
 
-	destDir := filepath.Join(baseDir, taskIdStr)
+	destDir := filepath.Join(s.baseDir, taskIdStr)
 	if err = util.EnsureDirectoryExists(destDir); err != nil {
 		return err
 	}
 	if !util.IsDirectoryExists(destDir + "/plugin") {
-		if err = util.Copy(pluginProject, destDir); err != nil {
+		if err = util.Copy(s.baseDir+"/plugin", destDir); err != nil {
 			return err
 		}
 	}
@@ -173,11 +179,6 @@ func (s *AgentController) sync(ctx context.Context, taskId int64, resourceVersio
 	}
 	return nil
 }
-
-const (
-	baseDir       = "/tmp"
-	pluginProject = baseDir + "/plugin"
-)
 
 // TODO
 func (s *AgentController) handleErr(ctx context.Context, err error, key interface{}) {
