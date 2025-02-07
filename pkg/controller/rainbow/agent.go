@@ -56,6 +56,8 @@ func (s *AgentController) Run(ctx context.Context, workers int) error {
 		return err
 	}
 
+	go s.report(ctx)
+
 	go s.getNextWorkItems(ctx)
 
 	for i := 0; i < workers; i++ {
@@ -63,6 +65,29 @@ func (s *AgentController) Run(ctx context.Context, workers int) error {
 	}
 
 	return nil
+}
+
+func (s *AgentController) report(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		newAgent, err := s.factory.Agent().GetByName(ctx, s.name)
+		if err != nil {
+			klog.Error("failed to get agent status %v", err)
+			continue
+		}
+
+		updates := map[string]interface{}{"last_transition_time": time.Now()}
+		if newAgent.Status == model.ErrorAgentType {
+			updates["status"] = model.RunAgentType
+		}
+
+		err = s.factory.Agent().UpdateByName(ctx, s.name, updates)
+		if err != nil {
+			klog.Error("failed to sync agent status %v", err)
+		}
+	}
 }
 
 func (s *AgentController) getNextWorkItems(ctx context.Context) {
@@ -199,7 +224,7 @@ func (s *AgentController) RegisterAgentIfNotExist(ctx context.Context) error {
 	if err == nil {
 		return nil
 	}
-	_, err = s.factory.Agent().Create(ctx, &model.Agent{Name: s.name})
+	_, err = s.factory.Agent().Create(ctx, &model.Agent{Name: s.name, Status: model.RunAgentType, Type: model.PublicAgentType})
 	return err
 }
 
