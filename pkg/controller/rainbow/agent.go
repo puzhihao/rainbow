@@ -81,6 +81,7 @@ func (s *AgentController) report(ctx context.Context) {
 		updates := map[string]interface{}{"last_transition_time": time.Now()}
 		if newAgent.Status == model.UnknownAgentType {
 			updates["status"] = model.RunAgentType
+			updates["message"] = "Agent started posting status."
 		}
 
 		err = s.factory.Agent().UpdateByName(ctx, s.name, updates)
@@ -155,6 +156,7 @@ func (s *AgentController) makePluginConfig(ctx context.Context, task model.Task)
 		Plugin: template.PluginOption{
 			Callback: s.callback,
 			TaskId:   taskId,
+			Synced:   true,
 		},
 		Registry: template.Registry{
 			Repository: registry.Repository,
