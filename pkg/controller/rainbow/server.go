@@ -19,6 +19,7 @@ type ServerInterface interface {
 	ListRegistries(ctx context.Context) (interface{}, error)
 
 	CreateTask(ctx context.Context, req *types.CreateTaskRequest) error
+	UpdateTaskStatus(ctx context.Context, req *types.UpdateTaskStatusRequest) error
 
 	GetAgent(ctx context.Context, agentId int64) (interface{}, error)
 	ListAgents(ctx context.Context) (interface{}, error)
@@ -27,6 +28,8 @@ type ServerInterface interface {
 	UpdateImage(ctx context.Context, req *types.UpdateImageRequest) error
 	GetImage(ctx context.Context, imageId int64) (interface{}, error)
 	ListImages(ctx context.Context, taskId int64) (interface{}, error)
+
+	UpdateImageStatus(ctx context.Context, req *types.UpdateImageStatusRequest) error
 
 	Run(ctx context.Context, workers int) error
 }
@@ -71,10 +74,10 @@ func (s *ServerController) monitor(ctx context.Context) {
 		for _, agent := range agents {
 			diff := time.Now().Sub(agent.LastTransitionTime)
 			if diff > time.Minute*5 {
-				if agent.Status == model.ErrorAgentType {
+				if agent.Status == model.UnknownAgentType {
 					continue
 				}
-				err = s.factory.Agent().UpdateByName(ctx, agent.Name, map[string]interface{}{"status": model.ErrorAgentType})
+				err = s.factory.Agent().UpdateByName(ctx, agent.Name, map[string]interface{}{"status": model.UnknownAgentType, "message": "Agent stopped posting status."})
 				if err != nil {
 					klog.Error("failed to sync agent %s status %v", agent.Name, err)
 				}

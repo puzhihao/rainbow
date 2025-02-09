@@ -14,6 +14,7 @@ type Config struct {
 }
 
 type DefaultOption struct {
+	Listen         int  `yaml:"listen"`
 	PushKubernetes bool `yaml:"push_kubernetes"`
 	PushImages     bool `yaml:"push_images"`
 }
@@ -25,6 +26,7 @@ type KubernetesOption struct {
 type PluginOption struct {
 	Callback string `yaml:"callback"`
 	TaskId   int64  `yaml:"task_id"`
+	Synced   bool   `yaml:"synced"`
 }
 
 type Registry struct {
