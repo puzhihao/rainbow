@@ -17,6 +17,7 @@ func (s *ServerController) CreateTask(ctx context.Context, req *types.CreateTask
 		RegisterId: req.RegisterId,
 		AgentName:  req.AgentName,
 		Mode:       req.Mode,
+		Status:     "等待执行",
 	})
 	if err != nil {
 		return err
@@ -34,6 +35,7 @@ func (s *ServerController) CreateTask(ctx context.Context, req *types.CreateTask
 			TaskName: req.Name,
 			UserId:   req.UserId,
 			Name:     i,
+			Status:   "同步准备中",
 		})
 	}
 
@@ -75,6 +77,7 @@ func (s *ServerController) UpdateTask(ctx context.Context, req *types.UpdateTask
 		images = append(images, model.Image{
 			TaskId: req.Id,
 			Name:   i,
+			Status: "同步准备中",
 		})
 	}
 	if err = s.factory.Image().CreateInBatch(ctx, images); err != nil {
