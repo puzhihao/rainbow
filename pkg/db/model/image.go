@@ -12,7 +12,6 @@ func init() {
 
 type Image struct {
 	rainbow.Model
-	GmtDeleted time.Time `gorm:"column:gmt_deleted;type:datetime" json:"gmt_deleted"`
 
 	Name     string `json:"name"`
 	Target   string `json:"target"`
@@ -22,7 +21,11 @@ type Image struct {
 	Status   string `json:"status"`
 	Message  string `json:"message"`
 
-	IsDeleted bool `json:"is_deleted"`
+	GmtDeleted time.Time `gorm:"column:gmt_deleted;type:datetime" json:"gmt_deleted"`
+	IsDeleted  bool      `json:"is_deleted"`
+
+	IsPublic bool   `json:"is_public"`
+	Tags     string `json:"tags"`
 }
 
 func (t *Image) TableName() string {
