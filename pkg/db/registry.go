@@ -20,6 +20,7 @@ type RegistryInterface interface {
 
 	GetByName(ctx context.Context, registryName string) (*model.Registry, error)
 	GetAdminRegistries(ctx context.Context, opts ...Options) ([]model.Registry, error)
+	GetDefaultRegistry(ctx context.Context, opts ...Options) (*model.Registry, error)
 }
 
 func newRegistry(db *gorm.DB) RegistryInterface {
@@ -108,9 +109,27 @@ func (a *registry) GetAdminRegistries(ctx context.Context, opts ...Options) ([]m
 	for _, opt := range opts {
 		tx = opt(tx)
 	}
-	if err := tx.Where("role = ?", 1).Find(&audits).Error; err != nil {
+	if err := tx.Where("role > ?", 0).Find(&audits).Error; err != nil {
 		return nil, err
 	}
 
 	return audits, nil
+}
+
+func (a *registry) GetDefaultRegistry(ctx context.Context, opts ...Options) (*model.Registry, error) {
+	var audits []model.Registry
+	tx := a.db.WithContext(ctx)
+	for _, opt := range opts {
+		tx = opt(tx)
+	}
+	if err := tx.Where("role = ?", 2).Find(&audits).Error; err != nil {
+		return nil, err
+	}
+
+	if len(audits) == 0 {
+		return nil, fmt.Errorf("no default register found")
+	}
+
+	one := audits[0]
+	return &one, nil
 }

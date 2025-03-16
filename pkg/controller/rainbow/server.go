@@ -3,12 +3,15 @@ package rainbow
 import (
 	"context"
 	"fmt"
+	"github.com/caoyingjunz/rainbow/pkg/util/huaweicloud"
 	"math/rand"
 	"time"
 
+	swr "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/swr/v2"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
+	rainbowconfig "github.com/caoyingjunz/rainbow/cmd/app/config"
 	"github.com/caoyingjunz/rainbow/pkg/db"
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
 	"github.com/caoyingjunz/rainbow/pkg/types"
@@ -51,13 +54,41 @@ type ServerInterface interface {
 }
 
 type ServerController struct {
-	factory db.ShareDaoFactory
+	factory    db.ShareDaoFactory
+	cfg        rainbowconfig.Config
+	swrClient  *swr.SwrClient
+	registryId *int64
 }
 
-func NewServer(f db.ShareDaoFactory) *ServerController {
-	return &ServerController{
+func NewServer(f db.ShareDaoFactory, cfg rainbowconfig.Config) *ServerController {
+	sc := &ServerController{
 		factory: f,
+		cfg:     cfg,
 	}
+
+	reg, err := f.Registry().GetDefaultRegistry(context.TODO())
+	if err == nil {
+		if len(reg.Ak) == 0 || len(reg.Sk) == 0 || len(reg.RegionId) == 0 {
+			klog.Errorf("默认华为仓库未设置必要配置, ak(%s) sk(%s) regionId(%s)", reg.Ak, reg.Sk, reg.RegionId)
+		} else {
+			client, err := huaweicloud.NewHuaweiCloudClient(huaweicloud.HuaweiCloudConfig{
+				AK:       reg.Ak,
+				SK:       reg.Sk,
+				RegionId: reg.RegionId,
+			})
+			if err == nil {
+				sc.swrClient = client
+				sc.registryId = &reg.Id
+				klog.Infof("创建华为仓库客户端成功，仓库名称: %s(%d) ", reg.Name, *sc.registryId)
+			} else {
+				klog.Errorf("创建为仓库客户端失败 %v", err)
+			}
+		}
+	} else {
+		klog.Errorf("获取默认华为仓库失败: %v", err)
+	}
+
+	return sc
 }
 
 func (s *ServerController) GetAgent(ctx context.Context, agentId int64) (interface{}, error) {

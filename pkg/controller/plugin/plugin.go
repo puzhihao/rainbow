@@ -37,6 +37,7 @@ type KubeadmImage struct {
 type PluginController struct {
 	KubernetesVersion string
 	Callback          string
+	RegistryId        int64
 	TaskId            int64
 	Synced            bool
 
@@ -117,6 +118,7 @@ func NewPluginController(cfg config.Config) *PluginController {
 		Cfg:        cfg,
 		Callback:   cfg.Plugin.Callback,
 		TaskId:     cfg.Plugin.TaskId,
+		RegistryId: cfg.Plugin.RegistryId,
 		Synced:     cfg.Plugin.Synced,
 		httpClient: util.NewHttpClient(5*time.Second, cfg.Plugin.Callback),
 	}
@@ -191,6 +193,10 @@ func (p *PluginController) doComplete() error {
 }
 
 func (p *PluginController) Complete() error {
+	if len(p.Cfg.Plugin.Driver) == 0 {
+		p.Cfg.Plugin.Driver = "docker"
+	}
+
 	status, msg, process := "初始化成功", "初始化环境结束", 1
 	var err error
 	if err = p.doComplete(); err != nil {
@@ -406,7 +412,7 @@ func (p *PluginController) SyncImageStatus(name, target, status, msg string) err
 	return p.httpClient.Put(
 		fmt.Sprintf("%s/rainbow/images/status", p.Callback),
 		nil,
-		map[string]interface{}{"status": status, "message": msg, "task_id": p.TaskId, "name": name, "target": target})
+		map[string]interface{}{"status": status, "message": msg, "task_id": p.TaskId, "name": name, "target": target, "registry_id": p.RegistryId})
 }
 
 func (p *PluginController) CreateImages(names []string) error {
