@@ -302,7 +302,6 @@ func (p *PluginController) doPushImage(imageToPush string) (string, error) {
 
 	case "docker":
 		klog.Infof("Pulling image: %s", imageToPush)
-
 		var dockerOption types.ImagePullOptions
 		if p.Cfg.Plugin.Arch == "arm" {
 			dockerOption.Platform = "linux/arm64"
