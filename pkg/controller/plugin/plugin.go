@@ -288,6 +288,9 @@ func (p *PluginController) doPushImage(imageToPush string) (string, error) {
 	switch p.Cfg.Plugin.Driver {
 	case "skopeo":
 		cmd = []string{"sudo", "chmod", "+x", "bin/skopeo", "&&", "bin/skopeo", "copy", "docker://" + imageToPush, "docker://" + targetImage}
+		if p.Cfg.Plugin.Arch == "arm" {
+			cmd = append(cmd, "--override-arch arm64")
+		}
 		klog.Infof("Making skopeo executable and copying image: %s", targetImage)
 		out, err := p.exec.Command("sh", "-c", strings.Join(cmd, " ")).CombinedOutput()
 		if err != nil {
@@ -299,7 +302,12 @@ func (p *PluginController) doPushImage(imageToPush string) (string, error) {
 
 	case "docker":
 		klog.Infof("Pulling image: %s", imageToPush)
-		reader, err := p.docker.ImagePull(context.TODO(), imageToPush, types.ImagePullOptions{})
+
+		var dockerOption types.ImagePullOptions
+		if p.Cfg.Plugin.Arch == "arm" {
+			dockerOption.Platform = "linux/arm64"
+		}
+		reader, err := p.docker.ImagePull(context.TODO(), imageToPush, dockerOption)
 		if err != nil {
 			klog.Errorf("Failed to pull image %s: %v", imageToPush, err)
 			return "", fmt.Errorf("failed to pull image %s: %v", imageToPush, err)
