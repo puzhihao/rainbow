@@ -26,6 +26,14 @@ type ImageInterface interface {
 	ListWithUser(ctx context.Context, userId string, opts ...Options) ([]model.Image, error)
 
 	Count(ctx context.Context) (int64, error)
+
+	GetByPath(ctx context.Context, path string) (*model.Image, error)
+	ListImagesWithTag(ctx context.Context, opts ...Options) ([]model.Image, error)
+
+	CreateTag(ctx context.Context, object *model.Tag) (*model.Tag, error)
+	DeleteTag(ctx context.Context, tagId int64) error
+	GetTagByImage(ctx context.Context, imageId int64, imagePath string) (*model.Tag, error)
+	ListTags(ctx context.Context, opts ...Options) ([]model.Tag, error)
 }
 
 func newImage(db *gorm.DB) ImageInterface {
@@ -160,4 +168,73 @@ func (a *image) Count(ctx context.Context) (int64, error) {
 	}
 
 	return total, nil
+}
+
+func (a *image) GetByPath(ctx context.Context, path string) (*model.Image, error) {
+	var audit model.Image
+	if err := a.db.WithContext(ctx).Where("path = ?", path).First(&audit).Error; err != nil {
+		return nil, err
+	}
+	return &audit, nil
+}
+
+func (a *image) ListImagesWithTag(ctx context.Context, opts ...Options) ([]model.Image, error) {
+	var audits []model.Image
+	tx := a.db.WithContext(ctx)
+	for _, opt := range opts {
+		tx = opt(tx)
+	}
+
+	if err := tx.Preload("Tags").Find(&audits).Error; err != nil {
+		return nil, err
+	}
+	return audits, nil
+}
+
+func (a *image) CreateTag(ctx context.Context, object *model.Tag) (*model.Tag, error) {
+	now := time.Now()
+	object.GmtCreate = now
+	object.GmtModified = now
+	if err := a.db.WithContext(ctx).Create(object).Error; err != nil {
+		return nil, err
+	}
+	return object, nil
+}
+
+func (a *image) CreateTagsInBatch(ctx context.Context, objects []model.Tag) error {
+	for _, object := range objects {
+		if _, err := a.CreateTag(ctx, &object); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *image) DeleteTag(ctx context.Context, tagId int64) error {
+	var audit model.Tag
+	if err := a.db.Clauses(clause.Returning{}).Where("id = ?", tagId).Delete(&audit).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *image) ListTags(ctx context.Context, opts ...Options) ([]model.Tag, error) {
+	var audits []model.Tag
+	tx := a.db.WithContext(ctx)
+	for _, opt := range opts {
+		tx = opt(tx)
+	}
+
+	if err := tx.Find(&audits).Error; err != nil {
+		return nil, err
+	}
+	return audits, nil
+}
+
+func (a *image) GetTagByImage(ctx context.Context, imageId int64, path string) (*model.Tag, error) {
+	var audit model.Tag
+	if err := a.db.WithContext(ctx).Where("image_id = ? and name = ?", imageId, path).First(&audit).Error; err != nil {
+		return nil, err
+	}
+	return &audit, nil
 }

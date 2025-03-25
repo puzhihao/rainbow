@@ -8,27 +8,47 @@ import (
 
 func init() {
 	register(&Image{})
+	register(&Tag{})
 }
 
 type Image struct {
 	rainbow.Model
 
-	Name       string `json:"name"`
-	Target     string `json:"target"`
-	TaskId     int64  `gorm:"index:idx_task" json:"task_id"`
+	Name     string `json:"name"`
+	TaskId   int64  `gorm:"index:idx_task" json:"task_id"`
+	TaskName string `json:"task_name"`
+
 	UserId     string `json:"user_id"`
 	RegisterId int64  `json:"register_id"`
-	TaskName   string `json:"task_name"`
 	Status     string `json:"status"`
-	Message    string `json:"message"`
 
 	GmtDeleted time.Time `gorm:"column:gmt_deleted;type:datetime" json:"gmt_deleted"`
 	IsDeleted  bool      `json:"is_deleted"`
 
-	IsPublic bool   `json:"is_public"`
-	Tags     string `json:"tags"`
+	Logo      string `json:"logo"`
+	Path      string `json:"path"`
+	Namespace string `json:"namespace"`
+	Mirror    string `json:"mirror"`
+	Size      int64  `json:"size"`
+	Tags      []Tag  `json:"tags" gorm:"foreignKey:ImageId"`
+	IsPublic  bool   `json:"is_public"`
+
+	Description string `json:"description"`
 }
 
 func (t *Image) TableName() string {
 	return "images"
+}
+
+type Tag struct {
+	rainbow.Model
+
+	ImageId int64  `gorm:"index:idx_image" json:"image_id"`
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+}
+
+func (t *Tag) TableName() string {
+	return "tags"
 }

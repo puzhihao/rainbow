@@ -352,6 +352,10 @@ func (p *PluginController) getImagesFromFile() ([]string, error) {
 }
 
 func (p *PluginController) Run() error {
+	if !p.Cfg.Default.PushImages && !p.Cfg.Default.PushKubernetes {
+		return nil
+	}
+
 	for _, runner := range p.Runners {
 		name := runner.GetName()
 		if err := runner.Run(); err != nil {

@@ -1,6 +1,9 @@
 package errors
 
-import "errors"
+import (
+	"errors"
+	"gorm.io/gorm"
+)
 
 var (
 	ErrRecordNotUpdate = errors.New("record not updated")
@@ -8,4 +11,8 @@ var (
 
 func IsNotUpdated(err error) bool {
 	return errors.Is(err, ErrRecordNotUpdate)
+}
+
+func IsNotFound(err error) bool {
+	return errors.Is(err, gorm.ErrRecordNotFound)
 }

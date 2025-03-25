@@ -11,6 +11,7 @@ type (
 		AgentName         string   `json:"agent_name"`
 		Mode              int64    `json:"mode"`
 		PublicImage       bool     `json:"public_image"`
+		Driver            string   `json:"driver"`
 	}
 
 	UpdateTaskRequest struct {

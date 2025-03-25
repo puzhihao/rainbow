@@ -15,7 +15,6 @@ import (
 
 	"github.com/caoyingjunz/pixiulib/strutil"
 	rainbowconfig "github.com/caoyingjunz/rainbow/cmd/app/config"
-	"github.com/caoyingjunz/rainbow/pkg/controller/plugin"
 	"github.com/caoyingjunz/rainbow/pkg/db"
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
 	"github.com/caoyingjunz/rainbow/pkg/util"
@@ -169,11 +168,6 @@ func (s *AgentController) makePluginConfig(ctx context.Context, task model.Task)
 		return nil, fmt.Errorf("failed to get registry %v", err)
 	}
 
-	driver := plugin.DockerDriver
-	if task.Mode == 1 {
-		driver = plugin.SkopeoDriver
-	}
-
 	pluginTemplateConfig := &rainbowconfig.PluginTemplateConfig{
 		Default: rainbowconfig.DefaultOption{
 			Time: time.Now().Unix(), // 注入时间戳，确保每次内容都不相同
@@ -183,7 +177,7 @@ func (s *AgentController) makePluginConfig(ctx context.Context, task model.Task)
 			TaskId:     taskId,
 			RegistryId: registry.Id,
 			Synced:     true,
-			Driver:     driver,
+			Driver:     task.Driver,
 		},
 		Registry: rainbowconfig.Registry{
 			Repository: registry.Repository,
@@ -196,15 +190,17 @@ func (s *AgentController) makePluginConfig(ctx context.Context, task model.Task)
 	// 根据type判断是镜像列表推送还是k8s镜像组推送
 	switch task.Type {
 	case 0:
-		images, err := s.factory.Image().ListWithTask(ctx, taskId)
+		images, err := s.factory.Image().ListImagesWithTag(ctx, db.WithTask(taskId))
 		if err != nil {
 			return nil, fmt.Errorf("failed to get images %v", err)
 		}
-
 		var img []string
-		for _, image := range images {
-			img = append(img, image.Name)
+		for _, i := range images {
+			for _, tag := range i.Tags {
+				img = append(img, fmt.Sprintf("%s:%s", i.Path, tag.Name))
+			}
 		}
+
 		pluginTemplateConfig.Default.PushImages = true
 		pluginTemplateConfig.Images = img
 	case 1:
