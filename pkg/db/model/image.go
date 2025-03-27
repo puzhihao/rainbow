@@ -15,6 +15,7 @@ type Image struct {
 
 	Name       string `json:"name"`
 	Target     string `json:"target"`
+	Dockerfile string `json:"dockerfile"`
 	TaskId     int64  `gorm:"index:idx_task" json:"task_id"`
 	UserId     string `json:"user_id"`
 	RegisterId int64  `json:"register_id"`

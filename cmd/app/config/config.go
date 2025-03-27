@@ -21,6 +21,7 @@ type DefaultOption struct {
 
 	PushKubernetes bool `yaml:"push_kubernetes"`
 	PushImages     bool `yaml:"push_images"`
+	BuildImages    bool `yaml:"build_images"`
 
 	Time int64 `yaml:"time"`
 }
@@ -72,4 +73,6 @@ type PluginTemplateConfig struct {
 	Plugin     PluginOption     `yaml:"plugin"`
 	Registry   Registry         `yaml:"registry"`
 	Images     []string         `yaml:"images"`
+	Image      string           `yaml:"image"`
+	Dockerfile string           `yaml:"dockerfile"`
 }

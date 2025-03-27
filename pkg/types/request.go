@@ -18,6 +18,8 @@ type (
 		Type              int      `json:"type"` // 0：直接指定镜像列表 1: 指定 kubernetes 版本
 		KubernetesVersion string   `json:"kubernetes_version"`
 		Images            []string `json:"images"`
+		Image             string   `json:"image"`
+		Dockerfile        string   `json:"dockerfile"`
 		AgentName         string   `json:"agent_name"`
 		Mode              int64    `json:"mode"`
 		PublicImage       bool     `json:"public_image"`

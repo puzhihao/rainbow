@@ -27,31 +27,44 @@ func (s *ServerController) CreateTask(ctx context.Context, req *types.CreateTask
 		return err
 	}
 
-	if req.Type == 1 {
-		return nil
-	}
-
-	if len(req.Images) == 0 {
-		return nil
-	}
 	taskId := object.Id
-
 	var images []model.Image
-	trimImages := util.TrimAndFilter(req.Images)
-	for _, i := range trimImages {
+
+	switch req.Type {
+	case 0:
+		if len(req.Images) == 0 {
+			return nil
+		}
+		for _, name := range util.TrimAndFilter(req.Images) {
+			images = append(images, model.Image{
+				TaskId:     taskId,
+				TaskName:   req.Name,
+				UserId:     req.UserId,
+				RegisterId: req.RegisterId,
+				Name:       name,
+				Status:     "同步准备中",
+			})
+		}
+	case 2:
+		if len(req.Image) == 0 {
+			return nil
+		}
 		images = append(images, model.Image{
 			TaskId:     taskId,
 			TaskName:   req.Name,
 			UserId:     req.UserId,
 			RegisterId: req.RegisterId,
-			Name:       i,
+			Name:       req.Image,
+			Dockerfile: req.Dockerfile,
 			Status:     "同步准备中",
 		})
 	}
 
-	if err = s.factory.Image().CreateInBatch(ctx, images); err != nil {
-		_ = s.DeleteTaskWithImages(ctx, taskId)
-		return fmt.Errorf("failed to create tasks images %v", err)
+	if len(images) > 0 {
+		if err := s.factory.Image().CreateInBatch(ctx, images); err != nil {
+			_ = s.DeleteTaskWithImages(ctx, taskId)
+			return fmt.Errorf("failed to create task images: %v", err)
+		}
 	}
 
 	return nil

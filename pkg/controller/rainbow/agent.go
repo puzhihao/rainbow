@@ -210,8 +210,16 @@ func (s *AgentController) makePluginConfig(ctx context.Context, task model.Task)
 	case 1:
 		pluginTemplateConfig.Default.PushKubernetes = true
 		pluginTemplateConfig.Kubernetes.Version = task.KubernetesVersion
+	case 2:
+		images, err := s.factory.Image().ListWithTask(ctx, taskId)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get images %v", err)
+		}
+		pluginTemplateConfig.Default.PushImages = true
+		pluginTemplateConfig.Default.BuildImages = true
+		pluginTemplateConfig.Image = images[0].Name
+		pluginTemplateConfig.Dockerfile = images[0].Dockerfile
 	}
-
 	return pluginTemplateConfig, err
 }
 
