@@ -215,7 +215,6 @@ func (s *AgentController) makePluginConfig(ctx context.Context, task model.Task)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get images %v", err)
 		}
-		pluginTemplateConfig.Default.PushImages = true
 		pluginTemplateConfig.Default.BuildImages = true
 		pluginTemplateConfig.Image = images[0].Name
 		pluginTemplateConfig.Dockerfile = images[0].Dockerfile

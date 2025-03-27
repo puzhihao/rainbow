@@ -2,10 +2,12 @@ package plugin
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -106,7 +108,7 @@ func (i *image) Run() error {
 		images = append(images, kubeImages...)
 	}
 
-	if i.p.Cfg.Default.PushImages {
+	if i.p.Cfg.Default.PushImages || i.p.Cfg.Default.BuildImages {
 		fileImages, err := i.p.getImagesFromFile()
 		if err != nil {
 			return fmt.Errorf("")
@@ -163,6 +165,10 @@ func (p *PluginController) doComplete() error {
 	p.docker = cli
 	p.exec = exec.New()
 	p.Registry = p.Cfg.Registry
+
+	if p.Cfg.Default.BuildImages {
+		p.Cfg.Plugin.Driver = DockerDriver
+	}
 
 	if p.Cfg.Default.PushKubernetes {
 		if len(p.KubernetesVersion) == 0 {
@@ -304,18 +310,50 @@ func (p *PluginController) doPushImage(imageToPush string) (string, error) {
 		cmd1 := []string{"skopeo", "login", "-u", p.Registry.Username, "-p", p.Registry.Password, p.Registry.Repository, "&&", "skopeo", "copy", "docker://" + imageToPush, "docker://" + targetImage}
 		cmd = []string{"docker", "run", "--network", "host", "pixiuio/skopeo:1.17.0", "sh", "-c", strings.Join(cmd1, " ")}
 	case DockerDriver:
-		klog.Infof("Pulling image: %s", imageToPush)
-		reader, err := p.docker.ImagePull(context.TODO(), imageToPush, types.ImagePullOptions{})
-		if err != nil {
-			klog.Errorf("Failed to pull image %s: %v", imageToPush, err)
-			return "", fmt.Errorf("failed to pull image %s: %v", imageToPush, err)
-		}
-		io.Copy(os.Stdout, reader)
+		if p.Cfg.Default.BuildImages {
+			// 解码 Dockerfile
+			dockerfileData, err := base64.StdEncoding.DecodeString(p.Cfg.Dockerfile)
+			if err != nil {
+				klog.Errorf("Failed to decode Dockerfile: %v", err)
+				return "", fmt.Errorf("failed to decode Dockerfile: %v", err)
+			}
 
-		klog.Infof("Tagging image from %s to %s", imageToPush, targetImage)
-		if err := p.docker.ImageTag(context.TODO(), imageToPush, targetImage); err != nil {
-			klog.Errorf("Failed to tag image %s to %s: %v", imageToPush, targetImage, err)
-			return "", fmt.Errorf("failed to tag image %s to %s: %v", imageToPush, targetImage, err)
+			// 创建临时目录并写入 Dockerfile
+			tmpDir, err := os.MkdirTemp("", "docker-build-")
+			if err != nil {
+				klog.Errorf("Failed to create temporary directory: %v", err)
+				return "", fmt.Errorf("failed to create temporary directory: %v", err)
+			}
+
+			dockerfilePath := path.Join(tmpDir, "Dockerfile")
+			err = os.WriteFile(dockerfilePath, dockerfileData, 0644)
+			if err != nil {
+				klog.Errorf("Failed to write Dockerfile to %s: %v", dockerfilePath, err)
+				return "", fmt.Errorf("failed to write Dockerfile to %s: %v", dockerfilePath, err)
+			}
+
+			// 执行 Docker build
+			cmd := []string{"docker", "build", "-t", targetImage, tmpDir}
+			out, err := p.exec.Command(cmd[0], cmd[1:]...).CombinedOutput()
+			if err != nil {
+				klog.Errorf("Docker build failed: %v, Output: %s", err, string(out))
+				return "", fmt.Errorf("docker build failed: %v, Output: %s", err, string(out))
+			}
+			klog.Infof("Docker build output: %s", string(out))
+		} else {
+			klog.Infof("Pulling image: %s", imageToPush)
+			reader, err := p.docker.ImagePull(context.TODO(), imageToPush, types.ImagePullOptions{})
+			if err != nil {
+				klog.Errorf("Failed to pull image %s: %v", imageToPush, err)
+				return "", fmt.Errorf("failed to pull image %s: %v", imageToPush, err)
+			}
+			io.Copy(os.Stdout, reader)
+
+			klog.Infof("Tagging image from %s to %s", imageToPush, targetImage)
+			if err := p.docker.ImageTag(context.TODO(), imageToPush, targetImage); err != nil {
+				klog.Errorf("Failed to tag image %s to %s: %v", imageToPush, targetImage, err)
+				return "", fmt.Errorf("failed to tag image %s to %s: %v", imageToPush, targetImage, err)
+			}
 		}
 
 		cmd = []string{"docker", "push", targetImage}
@@ -336,6 +374,14 @@ func (p *PluginController) doPushImage(imageToPush string) (string, error) {
 
 func (p *PluginController) getImagesFromFile() ([]string, error) {
 	var imgs []string
+	if len(p.Cfg.Image) != 0 {
+		imageStr := strings.TrimSpace(p.Cfg.Image)
+		if strings.Contains(imageStr, " ") {
+			return nil, fmt.Errorf("error image format: %s", imageStr)
+		}
+		imgs = append(imgs, imageStr)
+		return imgs, nil
+	}
 	for _, i := range p.Cfg.Images {
 		imageStr := strings.TrimSpace(i)
 		if len(imageStr) == 0 {

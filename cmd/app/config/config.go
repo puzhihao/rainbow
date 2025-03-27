@@ -6,8 +6,9 @@ type Config struct {
 
 	Kubernetes KubernetesOption `yaml:"kubernetes"`
 	Images     []string         `yaml:"images"`
-
-	Server ServerOption `yaml:"server"`
+	Image      string           `yaml:"image"`
+	Dockerfile string           `yaml:"dockerfile"`
+	Server     ServerOption     `yaml:"server"`
 
 	Plugin   PluginOption `yaml:"plugin"`
 	Registry Registry     `yaml:"registry"`

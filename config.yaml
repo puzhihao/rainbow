@@ -3,6 +3,7 @@ default:
   mode: debug
   push_kubernetes: false
   push_images: false
+  build_images: false
 
 server:
   auth:
@@ -37,3 +38,7 @@ kubernetes:
 
 images:
   - docker.io/nginx:latest
+
+dockerfile: IyDkvb/nlKjlrpjmlrkgUHl0aG9uIOWfuuehgOmVnOWDj++8iEFscGluZSDniYjmnKzmm7Tovbvph4/vvIkKRlJPTSBweXRob246My45LWFscGluZQ==
+
+image: pixiu
