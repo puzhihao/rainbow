@@ -2,11 +2,11 @@ package rainbow
 
 import (
 	"context"
-	"github.com/caoyingjunz/rainbow/pkg/db"
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/services/swr/v2/model"
 	"k8s.io/klog/v2"
 
+	"github.com/caoyingjunz/rainbow/pkg/db"
 	rainbowmodel "github.com/caoyingjunz/rainbow/pkg/db/model"
 	"github.com/caoyingjunz/rainbow/pkg/types"
 )
