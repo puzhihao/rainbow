@@ -22,7 +22,9 @@ type Task struct {
 	Message           string `json:"message"`
 	Type              int    `json:"type"` // 0：直接指定镜像列表 1: 指定 kubernetes 版本
 	KubernetesVersion string `json:"kubernetes_version"`
-	Driver            string `json:"driver"` // docker or
+	Driver            string `json:"driver"` // docker or skopeo
+	Namespace         string `json:"namespace"`
+	IsPublic          bool   `json:"is_public"`
 }
 
 func (t *Task) TableName() string {
