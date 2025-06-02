@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -56,10 +57,30 @@ func main() {
 				klog.Errorf("Receive error: %v", err)
 				return
 			}
-			// TODO
 			klog.Infof("node(%s) received from server: %s", agentConfig.Name, msg.Result)
+
+			// 启动搜索
+			if err = opts.Controller.Agent().Search(context.TODO(), msg.Result); err != nil {
+				klog.Errorf("failed to search remote repository or tags %v", err)
+			}
 		}
 	}()
 
-	select {}
+	// 向 rpc 服务端进行注册
+	if err = stream.Send(&pb.Request{ClientId: agentConfig.Name, Payload: []byte("pong")}); err != nil {
+		klog.Fatal("client(%s) 向 rpc 服务注册失败", err)
+	}
+
+	// 启动客户端探活API
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		t := time.Now().Format("2006-01-02 15:04:05")
+		if err = stream.Send(&pb.Request{
+			ClientId: agentConfig.Name,
+			Payload:  []byte("pong at " + t),
+		}); err != nil {
+			klog.Errorf("client(%s) 探活 RPC 服务端失败 at %v %v", agentConfig.Name, t, err)
+		}
+	}
 }

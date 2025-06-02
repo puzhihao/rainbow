@@ -4,17 +4,21 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	swr "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/swr/v2"
 	swrmodel "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/swr/v2/model"
 	"github.com/robfig/cron/v3"
+	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
+	pb "github.com/caoyingjunz/rainbow/api/rpc/proto"
 	rainbowconfig "github.com/caoyingjunz/rainbow/cmd/app/config"
 	"github.com/caoyingjunz/rainbow/pkg/db"
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
@@ -81,6 +85,9 @@ type ServerInterface interface {
 	Store(ctx context.Context) (interface{}, error)
 	ImageDownflow(ctx context.Context, downflowMeta types.DownflowMeta) (interface{}, error)
 
+	SearchRepositories(ctx context.Context, req types.RemoteSearchRequest) (interface{}, error)
+	SearchRepositoryTags(ctx context.Context, req types.RemoteTagSearchRequest) (interface{}, error)
+
 	Run(ctx context.Context, workers int) error
 }
 
@@ -92,6 +99,10 @@ var (
 type ServerController struct {
 	factory db.ShareDaoFactory
 	cfg     rainbowconfig.Config
+
+	// rpcServer
+	pb.UnimplementedTunnelServer
+	lock sync.RWMutex
 }
 
 func NewServer(f db.ShareDaoFactory, cfg rainbowconfig.Config) *ServerController {
@@ -144,6 +155,7 @@ func (s *ServerController) Run(ctx context.Context, workers int) error {
 	go s.schedule(ctx)
 	go s.sync(ctx)
 	go s.startSyncDailyPulls(ctx)
+	go s.startRpcServer(ctx)
 
 	return nil
 }
@@ -167,6 +179,20 @@ func (s *ServerController) startSyncDailyPulls(ctx context.Context) {
 	<-sig
 	c.Stop()
 	klog.Infof("定时任务已停止")
+}
+
+func (s *ServerController) startRpcServer(ctx context.Context) {
+	listener, err := net.Listen("tcp", ":8091")
+	if err != nil {
+		klog.Fatalf("failed to listen %v", err)
+	}
+	gs := grpc.NewServer()
+	pb.RegisterTunnelServer(gs, s)
+
+	klog.Infof("starting rpc server (listening at %v)", listener.Addr())
+	if err = gs.Serve(listener); err != nil {
+		klog.Fatalf("failed to start rpc serve %v", err)
+	}
 }
 
 func (s *ServerController) syncPulls(ctx context.Context) {
