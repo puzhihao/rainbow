@@ -159,12 +159,18 @@ type (
 		Hub      string `json:"hub" form:"hub"`
 		ClientId string `json:"client_id" form:"client_id"` // 指定后端执行 clientId
 		Query    string `json:"query" form:"query"`
+		Page     string `json:"page" form:"page"`
+		PageSize string `json:"page_size" form:"page_size"`
 	}
 
 	RemoteTagSearchRequest struct {
-		Hub      string `json:"hub"  form:"hub"`
-		ClientId string `json:"client_id" form:"client_id"`
-		Query    string `json:"query" form:"query"`
+		Hub        string `json:"hub" form:"hub"`
+		ClientId   string `json:"client_id" form:"client_id"`
+		Namespace  string `json:"namespace" form:"namespace"`
+		Repository string `json:"repository" form:"repository"`
+		Query      string `json:"query" form:"query"`
+		Page       string `json:"page" form:"page"`
+		PageSize   string `json:"page_size" form:"page_size"`
 	}
 
 	RemoteMetaRequest struct {

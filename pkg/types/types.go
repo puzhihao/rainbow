@@ -6,6 +6,11 @@ type IdMeta struct {
 	ID int64 `uri:"Id" binding:"required"`
 }
 
+type NameMeta struct {
+	Namespace string `uri:"namespace" binding:"required" form:"name"`
+	Name      string `uri:"name" binding:"required" form:"name"`
+}
+
 type TaskMeta struct {
 	TaskId int64 `form:"task_id"`
 }
@@ -41,3 +46,9 @@ const (
 const (
 	SyncTaskInitializing = "initializing"
 )
+
+type SearchResult struct {
+	Result     []byte
+	ErrMessage string
+	StatusCode int
+}
