@@ -275,9 +275,26 @@ func (s *ServerController) ReRunTask(ctx context.Context, req *types.UpdateTaskR
 		klog.Errorf("重新执行任务 %d 失败 %v", req.Id, err)
 		return err
 	}
+
+	// 重置任务过程信息
+	if err := s.factory.Task().DeleteTaskMessages(ctx, req.Id); err != nil {
+		klog.Errorf("清理任务(%d)过程信息失败 %v", req.Id, err)
+	}
+
 	return nil
 }
 
 func (s *ServerController) ListTaskImages(ctx context.Context, taskId int64) (interface{}, error) {
 	return s.factory.Image().ListTags(ctx, db.WithTask(taskId))
+}
+
+func (s *ServerController) CreateTaskMessage(ctx context.Context, req types.CreateTaskMessageRequest) error {
+	return s.factory.Task().CreateTaskMessage(ctx, &model.TaskMessage{
+		Message: req.Message,
+		TaskId:  req.Id,
+	})
+}
+
+func (s *ServerController) ListTaskMessages(ctx context.Context, taskId int64) (interface{}, error) {
+	return s.factory.Task().ListTaskMessages(ctx, db.WithTask(taskId))
 }
