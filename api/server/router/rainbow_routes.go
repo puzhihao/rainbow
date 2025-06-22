@@ -234,14 +234,15 @@ func (cr *rainbowRouter) listTaskImages(c *gin.Context) {
 	resp := httputils.NewResponse()
 
 	var (
-		idMeta types.IdMeta
-		err    error
+		idMeta     types.IdMeta
+		listOption types.ListOptions
+		err        error
 	)
-	if err = httputils.ShouldBindAny(c, nil, &idMeta, nil); err != nil {
+	if err = httputils.ShouldBindAny(c, nil, &idMeta, &listOption); err != nil {
 		httputils.SetFailed(c, resp, err)
 		return
 	}
-	if resp.Result, err = cr.c.Server().ListTaskImages(c, idMeta.ID); err != nil {
+	if resp.Result, err = cr.c.Server().ListTaskImages(c, idMeta.ID, listOption); err != nil {
 		httputils.SetFailed(c, resp, err)
 		return
 	}
@@ -942,3 +943,27 @@ func (cr *rainbowRouter) listTaskMessages(c *gin.Context) {
 
 	httputils.SetSuccess(c, resp)
 }
+
+func (cr *rainbowRouter) createUser(c *gin.Context) {
+	resp := httputils.NewResponse()
+
+	var (
+		req types.CreateUserRequest
+		err error
+	)
+	if err = httputils.ShouldBindAny(c, &req, nil, nil); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+	if err = cr.c.Server().CreateUser(c, &req); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+
+	httputils.SetSuccess(c, resp)
+}
+
+func (cr *rainbowRouter) updateUser(c *gin.Context) {}
+func (cr *rainbowRouter) deleteUser(c *gin.Context) {}
+func (cr *rainbowRouter) getUser(c *gin.Context)    {}
+func (cr *rainbowRouter) listUsers(c *gin.Context)  {}
