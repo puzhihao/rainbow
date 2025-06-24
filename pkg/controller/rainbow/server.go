@@ -32,6 +32,12 @@ type ServerGetter interface {
 }
 
 type ServerInterface interface {
+	CreateDockerfile(ctx context.Context, req *types.CreateDockerfileRequest) error
+	DeleteDockerfile(ctx context.Context, dockerfileId int64) error
+	UpdateDockerfile(ctx context.Context, req *types.UpdateDockerfileRequest) error
+	ListDockerfile(ctx context.Context, listOption types.ListOptions) (interface{}, error)
+	GetDockerfile(ctx context.Context, dockerfileId int64) (interface{}, error)
+
 	CreateRegistry(ctx context.Context, req *types.CreateRegistryRequest) error
 	UpdateRegistry(ctx context.Context, req *types.UpdateRegistryRequest) error
 	DeleteRegistry(ctx context.Context, registryId int64) error
