@@ -963,7 +963,88 @@ func (cr *rainbowRouter) createUser(c *gin.Context) {
 	httputils.SetSuccess(c, resp)
 }
 
-func (cr *rainbowRouter) updateUser(c *gin.Context) {}
-func (cr *rainbowRouter) deleteUser(c *gin.Context) {}
-func (cr *rainbowRouter) getUser(c *gin.Context)    {}
-func (cr *rainbowRouter) listUsers(c *gin.Context)  {}
+func (cr *rainbowRouter) updateUser(c *gin.Context) {
+	resp := httputils.NewResponse()
+
+	var (
+		idMeta struct {
+			ID string `uri:"Id" binding:"required"`
+		}
+		req types.UpdateUserRequest
+		err error
+	)
+	if err = httputils.ShouldBindAny(c, &req, &idMeta, nil); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+
+	req.UserId = idMeta.ID
+	if err = cr.c.Server().UpdateUser(c, &req); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+
+	httputils.SetSuccess(c, resp)
+}
+
+func (cr *rainbowRouter) deleteUser(c *gin.Context) {
+	resp := httputils.NewResponse()
+
+	var (
+		idMeta struct {
+			ID string `uri:"Id" binding:"required"`
+		}
+		err error
+	)
+	if err = httputils.ShouldBindAny(c, nil, &idMeta, nil); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+	if err = cr.c.Server().DeleteUser(c, idMeta.ID); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+
+	httputils.SetSuccess(c, resp)
+
+}
+
+func (cr *rainbowRouter) getUser(c *gin.Context) {
+	resp := httputils.NewResponse()
+
+	var (
+		idMeta struct {
+			ID string `uri:"Id" binding:"required"`
+		}
+		err error
+	)
+	if err = httputils.ShouldBindAny(c, nil, &idMeta, nil); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+	if resp.Result, err = cr.c.Server().GetUser(c, idMeta.ID); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+
+	httputils.SetSuccess(c, resp)
+
+}
+func (cr *rainbowRouter) listUsers(c *gin.Context) {
+	resp := httputils.NewResponse()
+
+	var (
+		listOption types.ListOptions
+		err        error
+	)
+	if err = httputils.ShouldBindAny(c, nil, nil, &listOption); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+	if resp.Result, err = cr.c.Server().ListUsers(c, listOption); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+
+	httputils.SetSuccess(c, resp)
+}
