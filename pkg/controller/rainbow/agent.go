@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/go-redis/redis/v8"
+	"io/ioutil"
 	"math/rand"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
@@ -138,8 +140,10 @@ func (s *AgentController) Run(ctx context.Context, workers int) error {
 		return err
 	}
 
-	go s.report(ctx)
+	go s.startHeartbeat(ctx)
 	go s.getNextWorkItems(ctx)
+	go s.startSyncActionUsage(ctx)
+
 	for i := 0; i < workers; i++ {
 		go wait.UntilWithContext(ctx, s.worker, 1*time.Second)
 	}
@@ -147,7 +151,97 @@ func (s *AgentController) Run(ctx context.Context, workers int) error {
 	return nil
 }
 
-func (s *AgentController) report(ctx context.Context) {
+func (s *AgentController) startSyncActionUsage(ctx context.Context) {
+	rand.Seed(time.Now().UnixNano())
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		s.syncActionUsage(ctx)
+	}
+}
+
+func (s *AgentController) syncActionUsage(ctx context.Context) {
+	agents, err := s.factory.Agent().List(ctx)
+	if err != nil {
+		klog.Errorf("获取 agent 失败 %v 等待下次同步", err)
+		return
+	}
+
+	for _, agent := range agents {
+		if len(agent.GithubUser) == 0 || len(agent.GithubRepository) == 0 || len(agent.GithubToken) == 0 {
+			klog.Infof("agent(%s) 的 github 属性存在空值，忽略", agent.Name)
+			continue
+		}
+
+		// TODO: 随机等待一段时间
+		klog.Infof("开始同步 agent(%s) 的 usage", agent.Name)
+		if err = s.syncOne(ctx, agent); err != nil {
+			klog.Errorf("agent(%s) 同步 usage 失败 %v", agent.Name, err)
+			continue
+		}
+		klog.Infof("完成同步 agent(%s) 的 usage", agent.Name)
+
+		// 随机等待一段时间
+		time.Sleep(time.Duration(rand.Int63n(int64(5*time.Second-1*time.Second))) * time.Second)
+	}
+}
+
+func (s *AgentController) syncOne(ctx context.Context, agent model.Agent) error {
+	url := fmt.Sprintf("https://api.github.com/users/%s/settings/billing/usage", agent.GithubUser)
+	client := &http.Client{Timeout: 30 * time.Second}
+	request, err := http.NewRequest("", url, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", agent.GithubToken))
+	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("error resp %s", resp.Status)
+	}
+
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	var ud UsageData
+	if err = json.Unmarshal(data, &ud); err != nil {
+		return err
+	}
+	ga := ud.UsageItems[len(ud.UsageItems)-1]
+
+	return s.factory.Agent().UpdateByName(ctx, agent.Name, map[string]interface{}{"gross_amount": ga.GrossAmount})
+}
+
+type UsageData struct {
+	UsageItems []UsageItem `json:"usageItems"`
+}
+
+type UsageItem struct {
+	Date           time.Time `json:"date"`
+	Product        string    `json:"product"`
+	SKU            string    `json:"sku"`
+	Quantity       float64   `json:"quantity"`
+	UnitType       string    `json:"unitType"`
+	PricePerUnit   float64   `json:"pricePerUnit"`
+	GrossAmount    float64   `json:"grossAmount"`
+	DiscountAmount float64   `json:"discountAmount"`
+	NetAmount      float64   `json:"netAmount"`
+	RepositoryName string    `json:"repositoryName"`
+}
+
+func (s *AgentController) startHeartbeat(ctx context.Context) {
+	klog.Infof("启动 agent 心跳检测")
+
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
