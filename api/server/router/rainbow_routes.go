@@ -372,6 +372,25 @@ func (cr *rainbowRouter) createRegistry(c *gin.Context) {
 	httputils.SetSuccess(c, resp)
 }
 
+func (cr *rainbowRouter) loginRegistry(c *gin.Context) {
+	resp := httputils.NewResponse()
+
+	var (
+		req types.CreateRegistryRequest
+		err error
+	)
+	if err = httputils.ShouldBindAny(c, &req, nil, nil); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+	if err = cr.c.Server().LoginRegistry(c, &req); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+
+	httputils.SetSuccess(c, resp)
+}
+
 func (cr *rainbowRouter) updateRegistry(c *gin.Context) {
 	resp := httputils.NewResponse()
 
