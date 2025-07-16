@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -144,9 +145,57 @@ func (s *AgentController) Run(ctx context.Context, workers int) error {
 	go s.startHeartbeat(ctx)
 	go s.getNextWorkItems(ctx)
 	go s.startSyncActionUsage(ctx)
+	go s.startGC(ctx)
 
 	for i := 0; i < workers; i++ {
 		go wait.UntilWithContext(ctx, s.worker, 1*time.Second)
+	}
+
+	return nil
+}
+
+func (s *AgentController) startGC(ctx context.Context) {
+	// 1小时尝试回收一次
+	ticker := time.NewTicker(3600 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if err := s.GarbageCollect(ctx); err != nil {
+			klog.Errorf("GarbageCollect 失败: %v", err)
+			continue
+		}
+		klog.Infof("GarbageCollect 完成")
+	}
+}
+
+func (s *AgentController) GarbageCollect(ctx context.Context) error {
+	entries, err := os.ReadDir(s.baseDir)
+	if err != nil {
+		return fmt.Errorf("failed to read directory: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if entry.Name() == "plugin" {
+			continue
+		}
+
+		fileInfo, err := entry.Info()
+		if err != nil {
+			klog.Errorf("获取文件夹(%s)信息失败 %v, 忽略", entry.Name(), err)
+			continue
+		}
+
+		// 回收指定时间的文件
+		now := time.Now()
+		if now.Sub(fileInfo.ModTime()) > time.Duration(s.cfg.Agent.RetainDays)*24*time.Hour {
+			removeDir := filepath.Join(s.baseDir, fileInfo.Name())
+			util.RemoveFile(removeDir)
+			klog.Infof("任务文件 %s 已被回收", removeDir)
+		} else {
+			klog.Infof("任务文件 %s 还在有效期内，暂不回收", fileInfo.Name())
+		}
 	}
 
 	return nil
@@ -318,7 +367,15 @@ func (s *AgentController) processNextWorkItem(ctx context.Context) bool {
 		s.handleErr(ctx, err, key)
 	} else {
 		_ = s.factory.Task().UpdateDirectly(ctx, taskId, map[string]interface{}{"status": "镜像初始化", "message": "初始化环境中", "process": 1})
-		s.handleErr(ctx, s.sync(ctx, taskId, resourceVersion), key)
+		if err = s.factory.Task().CreateTaskMessage(ctx, &model.TaskMessage{TaskId: taskId, Message: "节点调度完成"}); err != nil {
+			klog.Errorf("记录节点调度失败 %v", err)
+		}
+		if err = s.sync(ctx, taskId, resourceVersion); err != nil {
+			if msgErr := s.factory.Task().CreateTaskMessage(ctx, &model.TaskMessage{TaskId: taskId, Message: fmt.Sprintf("同步失败，原因: %v", err)}); msgErr != nil {
+				klog.Errorf("记录同步失败 %v", msgErr)
+			}
+			s.handleErr(ctx, err, key)
+		}
 	}
 	return true
 }
