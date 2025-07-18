@@ -145,6 +145,24 @@ func WithNameLike(name string) Options {
 	}
 }
 
+func WithNamespace(ns string) Options {
+	return func(tx *gorm.DB) *gorm.DB {
+		if len(ns) == 0 {
+			return tx
+		}
+		return tx.Where("namespace = ?", ns)
+	}
+}
+
+func WithAgent(agent string) Options {
+	return func(tx *gorm.DB) *gorm.DB {
+		if len(agent) == 0 {
+			return tx
+		}
+		return tx.Where("agent_name = ?", agent)
+	}
+}
+
 func WithStatus(status string) Options {
 	return func(tx *gorm.DB) *gorm.DB {
 		if len(status) == 0 {

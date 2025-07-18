@@ -198,7 +198,7 @@ type (
 	// PageRequest 分页配置
 	PageRequest struct {
 		Page  int `form:"page" json:"page"`   // 页数，表示第几页
-		Limit int `form:"limit" json:"limit"` // 每页数量
+		Limit int `form:"limit" json:"limit"` // 每页数量，表示每页几个对象
 	}
 	// QueryOption 搜索配置
 	QueryOption struct {
@@ -207,8 +207,9 @@ type (
 	}
 
 	CustomMeta struct {
-		Status int `form:"status"`
-		Limits int `form:"limits"`
+		Status    int    `form:"status"`
+		Namespace string `form:"namespace"`
+		Agent     string `form:"agent"`
 	}
 
 	RemoteSearchRequest struct {
@@ -265,4 +266,22 @@ type ListOptions struct {
 
 	PageRequest `json:",inline"` // 分页请求属性
 	QueryOption `json:",inline"` // 搜索内容
+}
+
+func (o *ListOptions) SetDefaultPageOption() {
+	// 初始化分页属性
+	if o.Page <= 0 {
+		o.Page = 1
+	}
+	if o.Limit <= 0 || o.Limit > 100 {
+		o.Limit = 10
+	}
+}
+
+type PageResult struct {
+	PageRequest `json:",inline"`
+
+	Total   int64       `json:"total"`   // 总记录数
+	Items   interface{} `json:"items"`   // 数据列表
+	Message string      `json:"message"` // 正常或异常信息
 }
