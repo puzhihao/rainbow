@@ -44,6 +44,11 @@ type TaskInterface interface {
 	GetUser(ctx context.Context, userId string) (*model.User, error)
 	DeleteUser(ctx context.Context, userId string) error
 	UpdateUser(ctx context.Context, userId string, resourceVersion int64, updates map[string]interface{}) error
+
+	ListKubernetesVersions(ctx context.Context, opts ...Options) ([]model.KubernetesVersion, error)
+	GetKubernetesVersionCount(ctx context.Context, opts ...Options) (int64, error)
+	GetKubernetesVersion(ctx context.Context, name string) (*model.KubernetesVersion, error)
+	CreateKubernetesVersion(ctx context.Context, object *model.KubernetesVersion) error
 }
 
 func newTask(db *gorm.DB) TaskInterface {
@@ -336,4 +341,51 @@ func (a *task) ListUsers(ctx context.Context, opts ...Options) ([]model.User, er
 
 func (a *task) DeleteUser(ctx context.Context, userId string) error {
 	return a.db.WithContext(ctx).Where("user_id = ?", userId).Delete(&model.User{}).Error
+}
+
+func (a *task) ListKubernetesVersions(ctx context.Context, opts ...Options) ([]model.KubernetesVersion, error) {
+	var audits []model.KubernetesVersion
+	tx := a.db.WithContext(ctx)
+	for _, opt := range opts {
+		tx = opt(tx)
+	}
+
+	if err := tx.Find(&audits).Error; err != nil {
+		return nil, err
+	}
+
+	return audits, nil
+}
+
+func (a *task) GetKubernetesVersionCount(ctx context.Context, opts ...Options) (int64, error) {
+	tx := a.db.WithContext(ctx)
+	for _, opt := range opts {
+		tx = opt(tx)
+	}
+
+	var total int64
+	if err := tx.Model(&model.KubernetesVersion{}).Count(&total).Error; err != nil {
+		return 0, err
+	}
+
+	return total, nil
+}
+
+func (a *task) GetKubernetesVersion(ctx context.Context, name string) (*model.KubernetesVersion, error) {
+	var audit model.KubernetesVersion
+	if err := a.db.WithContext(ctx).Where("name = ?", name).First(&audit).Error; err != nil {
+		return nil, err
+	}
+	return &audit, nil
+}
+
+func (a *task) CreateKubernetesVersion(ctx context.Context, object *model.KubernetesVersion) error {
+	now := time.Now()
+	object.GmtCreate = now
+	object.GmtModified = now
+
+	if err := a.db.WithContext(ctx).Create(object).Error; err != nil {
+		return err
+	}
+	return nil
 }
