@@ -71,41 +71,66 @@ func (s *ServerController) CreateTask(ctx context.Context, req *types.CreateTask
 		req.Namespace = ""
 	}
 
-	object, err := s.factory.Task().Create(ctx, &model.Task{
-		Name:              req.Name,
-		UserId:            req.UserId,
-		UserName:          req.UserName,
-		RegisterId:        req.RegisterId,
-		AgentName:         req.AgentName,
-		Mode:              req.Mode,
-		Status:            TaskWaitStatus,
-		Type:              req.Type,
-		KubernetesVersion: req.KubernetesVersion,
-		Driver:            req.Driver,
-		Namespace:         req.Namespace,
-		IsPublic:          req.PublicImage,
-		Logo:              req.Logo,
-		IsOfficial:        req.IsOfficial,
-	})
-	if err != nil {
-		return err
-	}
-
-	taskId := object.Id
-	s.CreateTaskMessages(ctx, taskId, "同步已启动", "数据校验中，预计等待 1 分钟")
-
 	// 如果是k8s类型的镜像，则由 plugin 回调创建
 	// 0：直接指定镜像列表 1: 指定 kubernetes 版本
-	if req.Type == 1 {
-		klog.Infof("创建任务(%s)成功，其类型为 kubernetes，镜像由 plugin 回调创建", req.Name)
-		return nil
+	switch req.Type {
+	case 0:
+		object, err := s.factory.Task().Create(ctx, &model.Task{
+			Name:              req.Name,
+			UserId:            req.UserId,
+			UserName:          req.UserName,
+			RegisterId:        req.RegisterId,
+			AgentName:         req.AgentName,
+			Mode:              req.Mode,
+			Status:            TaskWaitStatus,
+			Type:              req.Type,
+			KubernetesVersion: req.KubernetesVersion,
+			Driver:            req.Driver,
+			Namespace:         req.Namespace,
+			IsPublic:          req.PublicImage,
+			Logo:              req.Logo,
+			IsOfficial:        req.IsOfficial,
+		})
+		if err != nil {
+			return err
+		}
+		taskId := object.Id
+		s.CreateTaskMessages(ctx, taskId, "同步已启动", "数据校验中，预计等待 1 分钟")
+
+		if err = s.CreateImageWithTag(ctx, taskId, req); err != nil {
+			s.CreateTaskMessages(ctx, taskId, fmt.Sprintf("创建镜像和版本失败 %v", err))
+			_ = s.DeleteTaskWithImages(ctx, taskId)
+			return err
+		}
+	case 1:
+		kubernetesVersions := strings.Split(req.KubernetesVersion, ",")
+		for _, kv := range kubernetesVersions {
+			subName := req.Name + "-" + kv
+			object, err := s.factory.Task().Create(ctx, &model.Task{
+				Name:              subName,
+				UserId:            req.UserId,
+				UserName:          req.UserName,
+				RegisterId:        req.RegisterId,
+				AgentName:         req.AgentName,
+				Mode:              req.Mode,
+				Status:            TaskWaitStatus,
+				Type:              req.Type,
+				KubernetesVersion: kv,
+				Driver:            req.Driver,
+				Namespace:         req.Namespace,
+				IsPublic:          req.PublicImage,
+				Logo:              req.Logo,
+				IsOfficial:        req.IsOfficial,
+			})
+			if err != nil {
+				return err
+			}
+
+			s.CreateTaskMessages(ctx, object.Id, "同步已启动", "数据校验中，预计等待 1 分钟")
+			klog.Infof("(%s) 的子任务(%s)创建成功，其类型为 kubernetes，镜像由 plugin 回调创建", req.Name, subName)
+		}
 	}
 
-	if err = s.CreateImageWithTag(ctx, taskId, req); err != nil {
-		s.CreateTaskMessages(ctx, taskId, fmt.Sprintf("创建镜像和版本失败 %v", err))
-		_ = s.DeleteTaskWithImages(ctx, taskId)
-		return err
-	}
 	return nil
 }
 
