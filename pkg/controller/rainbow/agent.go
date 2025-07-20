@@ -105,7 +105,7 @@ func (s *AgentController) Search(ctx context.Context, date []byte) error {
 		return err
 	}
 
-	klog.Infof("搜索(%s)结果已暂存 key(%s)", reqMeta.RepositorySearchRequest.Query, reqMeta.Uid)
+	klog.Infof("搜索结果已暂存, key(%s)", reqMeta.RepositorySearchRequest.Query, reqMeta.Uid)
 	return nil
 }
 
@@ -236,7 +236,7 @@ func (s *AgentController) startSyncActionUsage(ctx context.Context) {
 			klog.Errorf("agent(%s) 同步 usage 失败 %v", agent.Name, err)
 			continue
 		}
-		klog.Infof("完成同步 agent(%s) 的 usage", agent.Name)
+		//klog.Infof("完成同步 agent(%s) 的 usage", agent.Name)
 	}
 }
 

@@ -61,7 +61,7 @@ type ServerInterface interface {
 
 	UpdateAgent(ctx context.Context, req *types.UpdateAgentRequest) error
 	GetAgent(ctx context.Context, agentId int64) (interface{}, error)
-	ListAgents(ctx context.Context) (interface{}, error)
+	ListAgents(ctx context.Context, listOption types.ListOptions) (interface{}, error)
 	UpdateAgentStatus(ctx context.Context, req *types.UpdateAgentStatusRequest) error
 
 	CreateImage(ctx context.Context, req *types.CreateImageRequest) error
@@ -182,15 +182,20 @@ func (s *ServerController) UpdateAgentStatus(ctx context.Context, req *types.Upd
 }
 
 func (s *ServerController) UpdateAgent(ctx context.Context, req *types.UpdateAgentRequest) error {
+	repo := req.GithubRepository
+	if len(repo) == 0 {
+		repo = fmt.Sprintf("https://github.com/%s/plugin.git", req.AgentName)
+	}
+
 	updates := make(map[string]interface{})
 	updates["github_user"] = req.GithubUser
-	updates["github_repository"] = req.GithubRepository
+	updates["github_repository"] = repo
 	updates["github_token"] = req.GithubToken
 	return s.factory.Agent().UpdateByName(ctx, req.AgentName, updates)
 }
 
-func (s *ServerController) ListAgents(ctx context.Context) (interface{}, error) {
-	return s.factory.Agent().List(ctx)
+func (s *ServerController) ListAgents(ctx context.Context, listOption types.ListOptions) (interface{}, error) {
+	return s.factory.Agent().List(ctx, db.WithNameLike(listOption.NameSelector))
 }
 
 func (s *ServerController) Run(ctx context.Context, workers int) error {
@@ -199,8 +204,22 @@ func (s *ServerController) Run(ctx context.Context, workers int) error {
 	go s.startSyncDailyPulls(ctx)
 	go s.startRpcServer(ctx)
 	go s.startAgentHeartbeat(ctx)
+	go s.startSyncKubernetesVersion(ctx)
 
 	return nil
+}
+
+func (s *ServerController) startSyncKubernetesVersion(ctx context.Context) {
+	klog.Infof("starting kubernetes version syncer")
+	ticker := time.NewTicker(3600 * time.Second)
+	defer ticker.Stop()
+
+	opt := types.KubernetesTagRequest{SyncAll: false}
+	for range ticker.C {
+		if _, err := s.SyncKubernetesVersions(ctx, &opt); err != nil {
+			klog.Error("failed kubernetes version syncer %v", err)
+		}
+	}
 }
 
 func (s *ServerController) startSyncDailyPulls(ctx context.Context) {
