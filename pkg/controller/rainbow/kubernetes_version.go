@@ -36,7 +36,7 @@ func (s *ServerController) ListKubernetesVersions(ctx context.Context, listOptio
 
 	offset := (listOption.Page - 1) * listOption.Limit
 	opts = append(opts, []db.Options{
-		db.WithOrderByDesc(),
+		db.WithTagOrderByDESC(),
 		db.WithOffset(offset),
 		db.WithLimit(listOption.Limit),
 	}...)

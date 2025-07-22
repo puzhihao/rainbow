@@ -204,7 +204,7 @@ func (s *AgentController) Run(ctx context.Context, workers int) error {
 
 func (s *AgentController) startGC(ctx context.Context) {
 	// 1小时尝试回收一次
-	ticker := time.NewTicker(3600 * time.Second)
+	ticker := time.NewTicker(900 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -237,7 +237,7 @@ func (s *AgentController) GarbageCollect(ctx context.Context) error {
 
 		// 回收指定时间的文件
 		now := time.Now()
-		if now.Sub(fileInfo.ModTime()) > time.Duration(s.cfg.Agent.RetainDays)*24*time.Hour {
+		if now.Sub(fileInfo.ModTime()) > 30*time.Minute {
 			removeDir := filepath.Join(s.baseDir, fileInfo.Name())
 			util.RemoveFile(removeDir)
 			klog.Infof("任务文件 %s 已被回收", removeDir)

@@ -20,6 +20,7 @@ const (
 	defaultConfigFile = "/etc/rainbow/config.yaml"
 	defaultDataDir    = "/data"
 	defaultListen     = 8090
+	defaultRetainDays = 5
 
 	maxIdleConns = 10
 	maxOpenConns = 100
@@ -67,6 +68,9 @@ func (o *Options) Complete() error {
 
 	if len(o.ComponentConfig.Agent.DataDir) == 0 {
 		o.ComponentConfig.Agent.DataDir = defaultDataDir
+	}
+	if o.ComponentConfig.Agent.RetainDays == 0 {
+		o.ComponentConfig.Agent.RetainDays = defaultRetainDays
 	}
 	if o.ComponentConfig.Default.Listen == 0 {
 		o.ComponentConfig.Default.Listen = defaultListen
