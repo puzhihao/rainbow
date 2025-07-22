@@ -9,6 +9,12 @@ import (
 
 type Options func(*gorm.DB) *gorm.DB
 
+func WithTagOrderByDESC() Options {
+	return func(tx *gorm.DB) *gorm.DB {
+		return tx.Order("tag DESC")
+	}
+}
+
 func WithOrderByASC() Options {
 	return func(tx *gorm.DB) *gorm.DB {
 		return tx.Order("id ASC")
