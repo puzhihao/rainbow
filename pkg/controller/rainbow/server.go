@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
 	"github.com/caoyingjunz/rainbow/pkg/types"
 	"github.com/caoyingjunz/rainbow/pkg/util/huaweicloud"
+	"github.com/caoyingjunz/rainbow/pkg/util/uuid"
 )
 
 type ServerGetter interface {
@@ -52,6 +54,8 @@ type ServerInterface interface {
 	DeleteTask(ctx context.Context, taskId int64) error
 	GetTask(ctx context.Context, taskId int64) (interface{}, error)
 	UpdateTaskStatus(ctx context.Context, req *types.UpdateTaskStatusRequest) error
+
+	CreateSubscribe(ctx context.Context, req *types.CreateSubscribeRequest) error
 
 	ListTaskImages(ctx context.Context, taskId int64, listOption types.ListOptions) (interface{}, error)
 	ReRunTask(ctx context.Context, req *types.UpdateTaskRequest) error
@@ -205,8 +209,103 @@ func (s *ServerController) Run(ctx context.Context, workers int) error {
 	go s.startRpcServer(ctx)
 	go s.startAgentHeartbeat(ctx)
 	go s.startSyncKubernetesVersion(ctx)
+	go s.startSubscribeController(ctx)
 
 	return nil
+}
+
+func (s *ServerController) startSubscribeController(ctx context.Context) {
+	klog.Infof("starting subscribe controller")
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		subscribes, err := s.factory.Task().ListSubscribes(ctx, db.WithEnable(1))
+		if err != nil {
+			klog.Errorf("获取全部订阅失败 %v", err)
+			continue
+		}
+
+		for _, sub := range subscribes {
+			if sub.FailTimes >= 5 {
+				klog.Warningf("订阅 (%s) 失败超过限制，已终止订阅", sub.Path)
+				continue
+			}
+			now := time.Now()
+			if now.Sub(sub.LastNotifyTime) < sub.Interval*time.Second {
+				klog.Infof("订阅 (%s) 时间间隔 %s 暂时无需执行", sub.Path, sub.Interval)
+				continue
+			}
+
+			if err = s.subscribe(ctx, sub); err != nil {
+				klog.Error("failed to do Subscribe(%s) %v", sub.Path, err)
+			}
+		}
+	}
+}
+
+// 1. 获取本地已存在的镜像版本
+// 2. 获取远端镜像版本列表
+// 3. 同步差异镜像版本
+func (s *ServerController) subscribe(ctx context.Context, sub model.Subscribe) error {
+	exists, err := s.factory.Image().ListImagesWithTag(ctx, db.WithUser(sub.UserId), db.WithImagePath(sub.Path))
+	if err != nil {
+		return err
+	}
+	// 常规情况下 exists 只含有一个镜像
+	if len(exists) > 1 {
+		klog.Warningf("查询到镜像(%s)存在多个记录，不太正常，取第一个订阅", sub.Path)
+	}
+	tagMap := make(map[string]bool)
+	for _, v := range exists {
+		for _, tag := range v.Tags {
+			if tag.Status == types.SyncImageError {
+				klog.Infof("镜像(%s)版本(%s)状态异常，重新镜像同步", sub.Path, tag.Name)
+				continue
+			}
+			tagMap[tag.Name] = true
+		}
+		break
+	}
+	klog.Infof("检索到镜像(%s)已同步或正在同步版本有 %v", sub.Path, tagMap)
+
+	var ns, repo string
+	parts := strings.Split(sub.RawPath, "/")
+	if len(parts) == 2 {
+		ns, repo = parts[0], parts[1]
+	}
+	remotes, err := s.SearchRepositoryTags(ctx, types.RemoteTagSearchRequest{
+		Hub:        "dockerhub",
+		Namespace:  ns,
+		Repository: repo,
+		Page:       "1",
+		PageSize:   fmt.Sprintf("%d", sub.Limit), // 同步最新
+	})
+	if err != nil {
+		klog.Errorf("获取 dockerhub 镜像(%s)最新镜像版本失败 %v", sub.Path, err)
+		return err
+	}
+
+	tagResp := remotes.(HubTagResponse)
+	var images []string
+	for _, tag := range tagResp.Results {
+		images = append(images, sub.Path+":"+tag.Name)
+	}
+
+	err = s.CreateTask(ctx, &types.CreateTaskRequest{
+		Name:        uuid.NewRandName(fmt.Sprintf("subscribe-%s-", sub.Path), 8),
+		UserId:      sub.UserId,
+		UserName:    sub.UserName,
+		RegisterId:  sub.RegisterId,
+		Namespace:   sub.Namespace,
+		Images:      images,
+		PublicImage: true,
+	})
+	if err != nil {
+		klog.Errorf("创建订阅任务失败 %v", err)
+	}
+	return err
 }
 
 func (s *ServerController) startSyncKubernetesVersion(ctx context.Context) {

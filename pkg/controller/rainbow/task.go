@@ -11,6 +11,7 @@ import (
 
 	"github.com/caoyingjunz/rainbow/pkg/db"
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
+	"github.com/caoyingjunz/rainbow/pkg/db/model/rainbow"
 	"github.com/caoyingjunz/rainbow/pkg/types"
 	"github.com/caoyingjunz/rainbow/pkg/util"
 	"github.com/caoyingjunz/rainbow/pkg/util/errors"
@@ -57,7 +58,7 @@ func (s *ServerController) CreateTask(ctx context.Context, req *types.CreateTask
 
 	// 填充任务名称
 	if len(strings.TrimSpace(req.Name)) == 0 {
-		req.Name = uuid.NewRandName(8)
+		req.Name = uuid.NewRandName("", 8)
 	}
 	// 初始化仓库
 	if req.RegisterId == 0 {
@@ -402,4 +403,31 @@ func (s *ServerController) ListTasksByIds(ctx context.Context, ids []int64) (int
 
 func (s *ServerController) DeleteTasksByIds(ctx context.Context, ids []int64) error {
 	return s.factory.Task().DeleteInBatch(ctx, ids)
+}
+
+func (s *ServerController) CreateSubscribe(ctx context.Context, req *types.CreateSubscribeRequest) error {
+	if req.Limit > 100 {
+		return fmt.Errorf("订阅镜像版本数超过阈值 100")
+	}
+
+	rawPath := req.Path
+	parts := strings.Split(rawPath, "/")
+	if len(parts) != 1 && len(parts) != 2 {
+		return fmt.Errorf("订阅镜像名称路径不符合要求")
+	}
+
+	if len(parts) == 1 {
+		rawPath = "library" + "/" + rawPath
+	}
+	return s.factory.Task().CreateSubscribe(ctx, &model.Subscribe{
+		UserModel: rainbow.UserModel{
+			UserId:   req.UserId,
+			UserName: req.UserName,
+		},
+		Path:     req.Path,
+		RawPath:  rawPath,
+		Enable:   req.Enable,   // 是否启动订阅
+		Limit:    req.Limit,    // 最多同步多少个版本
+		Interval: req.Interval, // 多久执行一次
+	})
 }
