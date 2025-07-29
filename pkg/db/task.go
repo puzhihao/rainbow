@@ -30,6 +30,7 @@ type TaskInterface interface {
 	GetRunningTask(ctx context.Context, opts ...Options) ([]model.Task, error)
 
 	Count(ctx context.Context, opts ...Options) (int64, error)
+	CountSubscribe(ctx context.Context, opts ...Options) (int64, error)
 
 	ListReview(ctx context.Context) ([]model.Review, error)
 	AddDailyReview(ctx context.Context, object *model.Daily) error
@@ -51,6 +52,8 @@ type TaskInterface interface {
 	CreateKubernetesVersion(ctx context.Context, object *model.KubernetesVersion) error
 
 	CreateSubscribe(ctx context.Context, object *model.Subscribe) error
+	UpdateSubscribe(ctx context.Context, subId int64, resourceVersion int64, updates map[string]interface{}) error
+	DeleteSubscribe(ctx context.Context, subId int64) error
 	ListSubscribes(ctx context.Context, opts ...Options) ([]model.Subscribe, error)
 }
 
@@ -241,6 +244,20 @@ func (a *task) Count(ctx context.Context, opts ...Options) (int64, error) {
 	return total, nil
 }
 
+func (a *task) CountSubscribe(ctx context.Context, opts ...Options) (int64, error) {
+	tx := a.db.WithContext(ctx)
+	for _, opt := range opts {
+		tx = opt(tx)
+	}
+
+	var total int64
+	if err := tx.Model(&model.Subscribe{}).Count(&total).Error; err != nil {
+		return 0, err
+	}
+
+	return total, nil
+}
+
 func (a *task) ListReview(ctx context.Context) ([]model.Review, error) {
 	var audits []model.Review
 	tx := a.db.WithContext(ctx)
@@ -415,4 +432,23 @@ func (a *task) ListSubscribes(ctx context.Context, opts ...Options) ([]model.Sub
 	}
 
 	return audits, nil
+}
+
+func (a *task) UpdateSubscribe(ctx context.Context, subId int64, resourceVersion int64, updates map[string]interface{}) error {
+	updates["gmt_modified"] = time.Now()
+	updates["resource_version"] = resourceVersion + 1
+
+	f := a.db.WithContext(ctx).Model(&model.Subscribe{}).Where("id = ? and resource_version = ?", subId, resourceVersion).Updates(updates)
+	if f.Error != nil {
+		return f.Error
+	}
+	if f.RowsAffected == 0 {
+		return fmt.Errorf("record not updated")
+	}
+
+	return nil
+}
+
+func (a *task) DeleteSubscribe(ctx context.Context, subId int64) error {
+	return a.db.WithContext(ctx).Where("id = ?", subId).Delete(&model.Subscribe{}).Error
 }
