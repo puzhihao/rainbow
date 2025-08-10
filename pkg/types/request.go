@@ -72,6 +72,7 @@ type (
 		Images            []string `json:"images"`
 		Mode              int64    `json:"mode"`
 		PublicImage       bool     `json:"public_image"`
+		OnlyPushError     bool     `json:"only_push_error"` // 仅同步推送异常
 	}
 
 	UpdateTaskStatusRequest struct {
@@ -165,6 +166,14 @@ type (
 		ResourceVersion int64 `json:"resource_version"`
 
 		CreateUserRequest `json:",inline"`
+	}
+
+	CreateAgentRequest struct {
+		AgentName        string `json:"agent_name"`
+		Type             string `json:"type"`
+		GithubUser       string `json:"github_user"`       // github 后端用户名
+		GithubRepository string `json:"github_repository"` // github 仓库地址
+		GithubToken      string `json:"github_token"`      // github token
 	}
 
 	UpdateAgentRequest struct {

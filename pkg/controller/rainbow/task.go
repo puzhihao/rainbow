@@ -400,21 +400,26 @@ func (s *ServerController) GetTask(ctx context.Context, taskId int64) (interface
 }
 
 func (s *ServerController) ReRunTask(ctx context.Context, req *types.UpdateTaskRequest) error {
-	if err := s.factory.Task().Update(ctx, req.Id, req.ResourceVersion, map[string]interface{}{
+	updates := map[string]interface{}{
 		"agent_name": "",
 		"status":     TaskWaitStatus,
 		"process":    0,
 		"message":    "触发重新执行",
-	}); err != nil {
+	}
+	if req.OnlyPushError {
+		updates["only_push_error"] = true
+	}
+	if err := s.factory.Task().Update(ctx, req.Id, req.ResourceVersion, updates); err != nil {
 		klog.Errorf("重新执行任务 %d 失败 %v", req.Id, err)
 		return err
 	}
 
-	// 重置任务过程信息
-	if err := s.factory.Task().DeleteTaskMessages(ctx, req.Id); err != nil {
-		klog.Errorf("清理任务(%d)过程信息失败 %v", req.Id, err)
+	// 全量重新推送时，重置任务过程信息
+	if !req.OnlyPushError {
+		if err := s.factory.Task().DeleteTaskMessages(ctx, req.Id); err != nil {
+			klog.Errorf("清理任务(%d)过程信息失败 %v", req.Id, err)
+		}
 	}
-
 	return nil
 }
 
@@ -530,4 +535,58 @@ func (s *ServerController) UpdateSubscribe(ctx context.Context, req *types.Updat
 
 func (s *ServerController) DeleteSubscribe(ctx context.Context, subId int64) error {
 	return s.factory.Task().DeleteSubscribe(ctx, subId)
+}
+
+func (s *ServerController) preCreateAgent(ctx context.Context, req *types.CreateAgentRequest) error {
+	if len(req.AgentName) == 0 {
+		return fmt.Errorf("agent 名称不能为空")
+	}
+	if len(req.GithubUser) == 0 {
+		return fmt.Errorf("github 用户名不能为空")
+	}
+	if len(req.GithubToken) == 0 {
+		return fmt.Errorf("github token不能为空")
+	}
+
+	// 检查agent是否存在
+	_, err := s.factory.Agent().GetByName(ctx, req.AgentName)
+	if err == nil {
+		return fmt.Errorf("agent名称 %s 已存在", req.AgentName)
+	}
+
+	return nil
+}
+
+func (s *ServerController) CreateAgent(ctx context.Context, req *types.CreateAgentRequest) error {
+	if err := s.preCreateAgent(ctx, req); err != nil {
+		klog.Infof("创建agent前置检查失败: %v", err)
+		return err
+	}
+
+	if len(req.GithubRepository) == 0 {
+		req.GithubRepository = fmt.Sprintf("https://github.com/%s/plugin.git", req.GithubUser)
+	}
+	// 创建新的agent记录
+	agent := &model.Agent{
+		Name:             req.AgentName,
+		GithubUser:       req.GithubUser,
+		GithubToken:      req.GithubToken,
+		GithubRepository: req.GithubRepository,
+		Type:             req.Type,
+		Status:           model.UnStartType,
+	}
+	if _, err := s.factory.Agent().Create(ctx, agent); err != nil {
+		return fmt.Errorf("创建agent失败: %v", err)
+	}
+
+	return nil
+}
+
+func (s *ServerController) DeleteAgent(ctx context.Context, agentId int64) error {
+	// TODO 检查是否有正在运行的任务关联该agent
+	// 执行删除操作
+	if err := s.factory.Agent().Delete(ctx, agentId); err != nil {
+		return fmt.Errorf("删除agent失败: %v", err)
+	}
+	return nil
 }
