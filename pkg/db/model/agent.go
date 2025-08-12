@@ -16,6 +16,10 @@ const (
 	UnknownAgentType string = "未知"
 	UnStartType      string = "未启动"
 
+	DeletingAgentType   string = "删除中"
+	StartingAgentType   string = "启动中"
+	RestartingAgentType string = "重启中"
+
 	PublicAgentType  string = "public"
 	PrivateAgentType string = "private"
 )
@@ -28,8 +32,10 @@ type Agent struct {
 	Type               string    `json:"type"`
 	Status             string    `gorm:"column:status;" json:"status"`
 	Message            string    `json:"message"`
+	RainbowdName       string    `json:"rainbowd_name"`
 
 	GithubUser       string  `json:"github_user"`       // github 后端用户名
+	GithubEmail      string  `json:"github_email"`      // github 邮箱
 	GithubRepository string  `json:"github_repository"` // github 仓库地址
 	GithubToken      string  `json:"github_token"`      // github token
 	GrossAmount      float64 `json:"gross_amount"`      // github 账号开销金额，每个账号上限 16 美金，达到之后自动下线 agent
