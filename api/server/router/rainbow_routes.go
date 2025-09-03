@@ -343,7 +343,6 @@ func (cr *rainbowRouter) listTasks(c *gin.Context) {
 		httputils.SetFailed(c, resp, err)
 		return
 	}
-
 	if resp.Result, err = cr.c.Server().ListTasks(c, listOption); err != nil {
 		httputils.SetFailed(c, resp, err)
 		return
@@ -1225,6 +1224,25 @@ func (cr *rainbowRouter) listSubscribes(c *gin.Context) {
 		return
 	}
 	if resp.Result, err = cr.c.Server().ListSubscribes(c, listOption); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+
+	httputils.SetSuccess(c, resp)
+}
+
+func (cr *rainbowRouter) listSubscribeMessages(c *gin.Context) {
+	resp := httputils.NewResponse()
+
+	var (
+		idMeta types.IdMeta
+		err    error
+	)
+	if err = httputils.ShouldBindAny(c, nil, &idMeta, nil); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+	if resp.Result, err = cr.c.Server().ListSubscribeMessages(c, idMeta.ID); err != nil {
 		httputils.SetFailed(c, resp, err)
 		return
 	}
