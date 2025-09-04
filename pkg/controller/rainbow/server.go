@@ -62,6 +62,7 @@ type ServerInterface interface {
 	GetSubscribe(ctx context.Context, subId int64) (interface{}, error)
 
 	ListSubscribeMessages(ctx context.Context, subId int64) (interface{}, error)
+	RunSubscribeImmediately(ctx context.Context, req *types.UpdateSubscribeRequest) error
 
 	ListTaskImages(ctx context.Context, taskId int64, listOption types.ListOptions) (interface{}, error)
 	ReRunTask(ctx context.Context, req *types.UpdateTaskRequest) error
@@ -291,15 +292,10 @@ func (s *ServerController) startSubscribeController(ctx context.Context) {
 				s.DisableSubscribeWithMessage(ctx, sub, fmt.Sprintf("订阅(%s)失败已超过限制，终止订阅", sub.Path))
 				continue
 			}
-
-			if sub.WaitFirstRun {
-				klog.Infof("订阅 （%s）第一次执行，无需等待，直接执行")
-			} else {
-				now := time.Now()
-				if now.Sub(sub.LastNotifyTime) < sub.Interval*time.Second {
-					klog.Infof("订阅 (%s) 时间间隔 %v 暂时无需执行", sub.Path, sub.Interval*time.Second)
-					continue
-				}
+			now := time.Now()
+			if now.Sub(sub.LastNotifyTime) < sub.Interval*time.Second {
+				klog.Infof("订阅 (%s) 时间间隔 %v 暂时无需执行", sub.Path, sub.Interval*time.Second)
+				continue
 			}
 
 			changed, err := s.subscribe(ctx, sub)
@@ -381,18 +377,18 @@ func (s *ServerController) subscribe(ctx context.Context, sub model.Subscribe) (
 		klog.Errorf("重新触发异常tag失败: %v", err)
 	}
 
-	//klog.Infof("检索到镜像(%s)已同步或正在同步版本有 %v", sub.Path, tagMap)
-
 	var ns, repo string
 	parts := strings.Split(sub.RawPath, "/")
 	if len(parts) == 2 {
 		ns, repo = parts[0], parts[1]
 	}
 
-	pageSize := "5"
-	if sub.WaitFirstRun {
-		pageSize = fmt.Sprintf("%d", sub.Size)
+	size := sub.Size
+	if size > 15 {
+		size = 15
 	}
+	pageSize := fmt.Sprintf("%d", size)
+
 	remotes, err := s.SearchRepositoryTags(ctx, types.RemoteTagSearchRequest{
 		Hub:        "dockerhub",
 		Namespace:  ns,
@@ -449,9 +445,6 @@ func (s *ServerController) subscribe(ctx context.Context, sub model.Subscribe) (
 
 	updates := make(map[string]interface{})
 	updates["last_notify_time"] = time.Now()
-	if sub.WaitFirstRun {
-		updates["wait_first_run"] = false
-	}
 	if err = s.factory.Task().UpdateSubscribe(ctx, sub.Id, sub.ResourceVersion, updates); err != nil {
 		klog.Infof("订阅 (%s) 更新失败 %v", sub.Path, err)
 	}
@@ -716,4 +709,20 @@ func (s *ServerController) ListSubscribeMessages(ctx context.Context, subId int6
 
 func (s *ServerController) GetSubscribe(ctx context.Context, subId int64) (interface{}, error) {
 	return s.factory.Task().GetSubscribe(ctx, subId)
+}
+
+func (s *ServerController) RunSubscribeImmediately(ctx context.Context, req *types.UpdateSubscribeRequest) error {
+	sub, err := s.factory.Task().GetSubscribe(ctx, req.Id)
+	if err != nil {
+		return err
+	}
+
+	changed, err := s.subscribe(ctx, *sub)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return fmt.Errorf("未发现新增镜像，无需执行")
+	}
+	return nil
 }
