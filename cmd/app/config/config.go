@@ -91,6 +91,7 @@ type KubernetesOption struct {
 
 type PluginOption struct {
 	Callback   string `yaml:"callback"`
+	UserId     string `yaml:"user_id"`
 	TaskId     int64  `yaml:"task_id"`
 	RegistryId int64  `yaml:"registry_id"`
 	Synced     bool   `yaml:"synced"`
