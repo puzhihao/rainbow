@@ -16,6 +16,11 @@ import (
 	"github.com/caoyingjunz/rainbow/pkg/types"
 )
 
+const (
+	dingdingUrl = "https://oapi.dingtalk.com/robot/send?access_token="
+	WeConUrl    = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key="
+)
+
 type PushMessage struct {
 	Text    map[string]string `json:"text"`
 	Msgtype string            `json:"msgtype"`
@@ -54,12 +59,15 @@ func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotifi
 	for _, n := range list {
 		switch n.Type {
 		case "wecom":
-			err := s.SendWeComNotify(ctx, &n, req.Content)
+			err := s.SendDingdingOrWeComNotify(WeConUrl, &n, req.Content)
 			if err != nil {
 				return err
 			}
 		case "dingding":
-			// TODO
+			err := s.SendDingdingOrWeComNotify(dingdingUrl, &n, req.Content)
+			if err != nil {
+				return err
+			}
 		case "email":
 			// TODO
 		default:
@@ -69,34 +77,29 @@ func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotifi
 
 	return nil
 }
-
-func (s *ServerController) SendWeComNotify(ctx context.Context, req *model.Notification, msg string) error {
-
-	type WeComConfig struct {
-		URL   string `json:"url"`
+func (s *ServerController) SendDingdingOrWeComNotify(url string, req *model.Notification, msg string) error {
+	type Config struct {
 		Token string `json:"token"`
 	}
 
-	var wecomCfg WeComConfig
-	if err := json.Unmarshal([]byte(req.PushCfg), &wecomCfg); err != nil {
-		klog.Errorf("failed to parse WeCom config (ID: %d): %v", req.Id, err)
+	var cfg Config
+	if err := json.Unmarshal([]byte(req.PushCfg), &cfg); err != nil {
+		klog.Errorf("failed to parse config (ID: %d): %v", req.Id, err)
 	}
-
-	if wecomCfg.URL == "" || wecomCfg.Token == "" {
-		klog.Errorf("invalid WeCom config (ID: %d): empty URL or token", req.Id)
+	if cfg.Token == "" {
+		klog.Errorf("invalid config (ID: %d): empty URL or token", req.Id)
 	}
-
-	apiURL := fmt.Sprintf("%s?key=%s", wecomCfg.URL, wecomCfg.Token)
+	apiURL := fmt.Sprintf("%s%s", url, cfg.Token)
+	fmt.Println(apiURL)
 	payload := map[string]interface{}{
 		"msgtype": "text",
 		"text": map[string]string{
 			"content": msg, // 使用请求中的实际内容
 		},
 	}
-
 	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(marshal(payload)))
 	if err != nil {
-		klog.Errorf("failed to send to WeCom (ID: %d): %v", req.Id, err)
+		klog.Errorf("failed to send (ID: %d): %v", req.Id, err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -105,7 +108,7 @@ func (s *ServerController) SendWeComNotify(ctx context.Context, req *model.Notif
 	}()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		klog.Errorf("WeCom API error (ID: %d): %s - %s", req.Id, resp.Status, string(body))
+		klog.Errorf("API error (ID: %d): %s - %s", req.Id, resp.Status, string(body))
 
 	}
 	klog.Infof("successfully sent notification via config (ID: %d)", req.Id)
