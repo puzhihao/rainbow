@@ -362,6 +362,7 @@ func (p *PluginController) sync(imageToPush string, targetImage string, img conf
 
 func (p *PluginController) doPushImage(img config.Image) error {
 	imageMap := img.GetMap(p.Registry.Repository, p.Registry.Namespace)
+
 	for imageToPush, targetImage := range imageMap {
 		p.SyncImageStatus(targetImage, rainbowtypes.SyncImageRunning, "", img)
 		err := p.sync(imageToPush, targetImage, img)
@@ -373,6 +374,7 @@ func (p *PluginController) doPushImage(img config.Image) error {
 		p.SyncImageStatus(targetImage, rainbowtypes.SyncImageComplete, "", img)
 		p.CreateTaskMessage(fmt.Sprintf("镜像 %s 同步完成", imageToPush))
 	}
+
 	return nil
 }
 
