@@ -471,7 +471,6 @@ func (s *AgentController) makePluginConfig(ctx context.Context, task model.Task)
 		Plugin: rainbowconfig.PluginOption{
 			Callback:   s.callback,
 			TaskId:     taskId,
-			UserId:     task.UserId,
 			RegistryId: registry.Id,
 			Synced:     true,
 			Driver:     task.Driver,
