@@ -1,12 +1,11 @@
 package rainbow
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
+	"github.com/caoyingjunz/rainbow/pkg/util"
+	"time"
 
 	"k8s.io/klog/v2"
 
@@ -86,42 +85,21 @@ func (s *ServerController) SendDingdingOrWeComNotify(url string, req *model.Noti
 	if err := json.Unmarshal([]byte(req.PushCfg), &cfg); err != nil {
 		klog.Errorf("failed to parse config (ID: %d): %v", req.Id, err)
 	}
+
 	if cfg.Token == "" {
 		klog.Errorf("invalid config (ID: %d): empty URL or token", req.Id)
 	}
-	apiURL := fmt.Sprintf("%s%s", url, cfg.Token)
-	fmt.Println(apiURL)
-	payload := map[string]interface{}{
-		"msgtype": "text",
-		"text": map[string]string{
-			"content": msg, // 使用请求中的实际内容
-		},
-	}
-	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(marshal(payload)))
-	if err != nil {
-		klog.Errorf("failed to send (ID: %d): %v", req.Id, err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			klog.Warningf("failed to close response body (ID: %d): %v", req.Id, err)
-		}
-	}()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		klog.Errorf("API error (ID: %d): %s - %s", req.Id, resp.Status, string(body))
 
+	apiURL := fmt.Sprintf("%s%s", url, cfg.Token)
+	http := util.NewHttpClient(5*time.Second, apiURL)
+
+	if err := http.Post(apiURL, nil,
+		PushMessage{Text: map[string]string{"content": msg}, Msgtype: "text"}, map[string]string{"Content-Type": "application/json"}); err != nil {
+		klog.Errorf("failed to send (ID: %d): %v", req.Id, err)
+		return err
 	}
 	klog.Infof("successfully sent notification via config (ID: %d)", req.Id)
 	return nil
-}
-
-func marshal(v interface{}) []byte {
-	b, err := json.Marshal(v)
-	if err != nil {
-		klog.Errorf("failed to marshal JSON: %v", err)
-		return []byte("{}")
-	}
-	return b
 }
 
 //func (s *ServerController) SendRegisterNotify(ctx context.Context, req *types.SendNotificationRequest) error {
