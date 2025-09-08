@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/caoyingjunz/rainbow/pkg/db/model/rainbow"
 	"time"
 
 	"k8s.io/klog/v2"
 
 	"github.com/caoyingjunz/rainbow/pkg/db"
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
-	"github.com/caoyingjunz/rainbow/pkg/db/model/rainbow"
 	"github.com/caoyingjunz/rainbow/pkg/types"
 	"github.com/caoyingjunz/rainbow/pkg/util"
 )
@@ -26,16 +26,45 @@ type PushMessage struct {
 }
 
 func (s *ServerController) CreateNotify(ctx context.Context, req *types.CreateNotificationRequest) error {
-	_, err := s.factory.Notify().Create(ctx, &model.Notification{
+	var pushCfgJSON []byte
+	var err error
+
+	// 根据类型序列化对应的配置结构体
+	switch req.PushCfg.Type {
+	case "dingtalk":
+		if req.PushCfg.DingTalkPushCfg == nil {
+			return fmt.Errorf("钉钉推送配置不能为空")
+		}
+		pushCfgJSON, err = json.Marshal(req.PushCfg.DingTalkPushCfg)
+		if err != nil {
+			klog.Errorf("序列化钉钉推送配置失败: %v", err)
+			return err
+		}
+
+	case "wecom":
+		if req.PushCfg.WeComPushCfg == nil {
+			return fmt.Errorf("企微推送配置不能为空")
+		}
+		pushCfgJSON, err = json.Marshal(req.PushCfg.WeComPushCfg)
+		if err != nil {
+			klog.Errorf("序列化企业微信推送配置失败: %v", err)
+			return err
+		}
+
+	default:
+		return fmt.Errorf("不支持的推送类型: %s", req.PushCfg.Type)
+	}
+
+	_, err = s.factory.Notify().Create(ctx, &model.Notification{
 		Name:   req.Name,
 		Role:   req.Role,
 		Enable: req.Enable,
-		Type:   req.Type,
+		Type:   req.PushCfg.Type,
 		UserModel: rainbow.UserModel{
 			UserId:   req.UserId,
 			UserName: req.UserName,
 		},
-		PushCfg:   req.PushCfg,
+		PushCfg:   string(pushCfgJSON),
 		ShortDesc: req.ShortDesc,
 	})
 	if err != nil {
@@ -62,9 +91,9 @@ func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotifi
 	for _, n := range list {
 		switch n.Type {
 		case "wecom":
-			s.SendDingdingOrWeComNotify(WeConUrl, &n, req.Content)
+			s.SendDingdingOrWeComNotify(&n, req.Content)
 		case "dingding":
-			s.SendDingdingOrWeComNotify(dingdingUrl, &n, req.Content)
+			s.SendDingdingOrWeComNotify(&n, req.Content)
 		case "email":
 			// TODO
 		default:
@@ -74,24 +103,19 @@ func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotifi
 
 	return nil
 }
-func (s *ServerController) SendDingdingOrWeComNotify(url string, req *model.Notification, msg string) error {
+func (s *ServerController) SendDingdingOrWeComNotify(req *model.Notification, msg string) error {
 	type Config struct {
-		Token string `json:"token"`
+		Url string `json:"url"`
 	}
-
 	var cfg Config
 	if err := json.Unmarshal([]byte(req.PushCfg), &cfg); err != nil {
 		klog.Errorf("failed to parse config (ID: %d): %v", req.Id, err)
 	}
-
-	if cfg.Token == "" {
+	if cfg.Url == "" {
 		klog.Errorf("invalid config (ID: %d): empty URL or token", req.Id)
 	}
-
-	apiURL := fmt.Sprintf("%s%s", url, cfg.Token)
-	http := util.NewHttpClient(5*time.Second, apiURL)
-
-	if err := http.Post(apiURL, nil,
+	http := util.NewHttpClient(5*time.Second, cfg.Url)
+	if err := http.Post(cfg.Url, nil,
 		PushMessage{Text: map[string]string{"content": msg}, Msgtype: "text"}, map[string]string{"Content-Type": "application/json"}); err != nil {
 		klog.Errorf("failed to send (ID: %d): %v", req.Id, err)
 		return err

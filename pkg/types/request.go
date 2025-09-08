@@ -202,13 +202,27 @@ type (
 	CreateNotificationRequest struct {
 		UserMetaRequest `json:",inline"`
 
-		Name      string `json:"name"`
-		Role      int    `json:"role"` // 1 管理员 0 普通用户
-		Enable    bool   `json:"enable"`
-		Type      string `json:"type"` // 支持 webhook, dingtalk, wecom
-		PushCfg   string `json:"push_cfg"`
-		ShortDesc string `json:"short_desc"`
+		Name      string  `json:"name"`
+		Role      int     `json:"role"` // 1 管理员 0 普通用户
+		Enable    bool    `json:"enable"`
+		PushCfg   PushCfg `json:"push_cfg"`
+		ShortDesc string  `json:"short_desc"`
 	}
+
+	PushCfg struct {
+		Type             string `json:"type"` // 支持 webhook, dingtalk, wecom
+		*DingTalkPushCfg `json:"dingtalk,omitempty"`
+		*WeComPushCfg    `json:"wecom,omitempty"`
+	}
+
+	DingTalkPushCfg struct {
+		Url string `json:"url"`
+	}
+
+	WeComPushCfg struct {
+		Url string `json:"url"`
+	}
+
 	SendNotificationRequest struct {
 		TaskId  int64  `json:"task_id"`
 		Content string `json:"content"`
