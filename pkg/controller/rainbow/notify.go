@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/caoyingjunz/rainbow/pkg/util"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -13,6 +12,7 @@ import (
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
 	"github.com/caoyingjunz/rainbow/pkg/db/model/rainbow"
 	"github.com/caoyingjunz/rainbow/pkg/types"
+	"github.com/caoyingjunz/rainbow/pkg/util"
 )
 
 const (
@@ -46,12 +46,16 @@ func (s *ServerController) CreateNotify(ctx context.Context, req *types.CreateNo
 }
 
 func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotificationRequest) error {
-	list, err := s.factory.Notify().List(ctx, db.WithUser(req.UserId), db.WithEnable(1))
+	task, err := s.factory.Task().Get(ctx, req.TaskId)
+	if err != nil {
+		return fmt.Errorf("failed to get task: %w", err)
+	}
+	list, err := s.factory.Notify().List(ctx, db.WithUser(task.UserId), db.WithEnable(1))
 	if err != nil {
 		return fmt.Errorf("failed to query notification configs: %w", err)
 	}
 	if len(list) == 0 {
-		klog.Warningf("no enabled notification config found for user %s", req.UserId)
+		klog.Warningf("no enabled notification config found for user %s", task.UserId)
 		return nil
 	}
 

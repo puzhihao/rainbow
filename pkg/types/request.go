@@ -211,9 +211,8 @@ type (
 		ShortDesc string `json:"short_desc"`
 	}
 	SendNotificationRequest struct {
-		CreateNotificationRequest `json:",inline"`
-
-		Email string `json:"email"`
+		TaskId  int64  `json:"task_id"`
+		Content string `json:"content"`
 	}
 
 	// PageRequest 分页配置

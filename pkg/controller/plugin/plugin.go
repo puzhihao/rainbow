@@ -534,7 +534,7 @@ func (p *PluginController) SendNotifyMessage(msg string) {
 	if err := p.httpClient.Post(
 		fmt.Sprintf("%s/rainbow/send/notification", p.Callback),
 		nil,
-		map[string]interface{}{"user_id": p.Cfg.Plugin.UserId, "content": msg}, nil); err != nil {
+		map[string]interface{}{"task_id": p.Cfg.Plugin.TaskId, "content": msg}, nil); err != nil {
 		klog.Errorf("发送通知 %s 失败 %v", msg, err)
 	} else {
 		klog.Infof("发送通知 %s 成功", msg)
