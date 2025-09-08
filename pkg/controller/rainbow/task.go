@@ -407,6 +407,15 @@ func (s *ServerController) ListTasks(ctx context.Context, listOption types.ListO
 }
 
 func (s *ServerController) UpdateTaskStatus(ctx context.Context, req *types.UpdateTaskStatusRequest) error {
+	if req.Status == "镜像同步完成" {
+		err := s.SendNotify(ctx, &types.SendNotificationRequest{
+			TaskId:  req.TaskId,
+			Content: fmt.Sprintf("任务(%d)镜像同步完成", req.TaskId),
+		})
+		if err != nil {
+			klog.Errorf("任务(%d)镜像同步完成，发送通知失败 %v", req.TaskId, err)
+		}
+	}
 	return s.factory.Task().UpdateDirectly(ctx, req.TaskId, map[string]interface{}{"status": req.Status, "message": req.Message, "process": req.Process})
 }
 

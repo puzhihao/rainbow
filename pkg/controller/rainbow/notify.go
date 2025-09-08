@@ -62,15 +62,9 @@ func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotifi
 	for _, n := range list {
 		switch n.Type {
 		case "wecom":
-			err := s.SendDingdingOrWeComNotify(WeConUrl, &n, req.Content)
-			if err != nil {
-				return err
-			}
+			s.SendDingdingOrWeComNotify(WeConUrl, &n, req.Content)
 		case "dingding":
-			err := s.SendDingdingOrWeComNotify(dingdingUrl, &n, req.Content)
-			if err != nil {
-				return err
-			}
+			s.SendDingdingOrWeComNotify(dingdingUrl, &n, req.Content)
 		case "email":
 			// TODO
 		default:

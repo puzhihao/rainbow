@@ -434,14 +434,12 @@ func (p *PluginController) Run() error {
 	case err := <-errCh:
 		if err != nil {
 			p.SyncTaskStatus("镜像同步结束", "存在镜像同步异常", 2)
-			p.SendNotifyMessage("存在镜像同步异常")
 			return err
 		}
 	default:
 	}
 
 	p.SyncTaskStatus("镜像同步完成", "镜像全部同步完成", 2)
-	p.SendNotifyMessage("镜像全部同步完成")
 	p.CreateTaskMessage("镜像任务执行完成")
 	return nil
 }
@@ -527,16 +525,5 @@ func (p *PluginController) CreateTaskMessage(msg string) {
 		klog.Errorf("创建 %s 失败 %v", msg, err)
 	} else {
 		klog.Infof("创建 %s 成功", msg)
-	}
-}
-
-func (p *PluginController) SendNotifyMessage(msg string) {
-	if err := p.httpClient.Post(
-		fmt.Sprintf("%s/rainbow/send/notification", p.Callback),
-		nil,
-		map[string]interface{}{"task_id": p.Cfg.Plugin.TaskId, "content": msg}, nil); err != nil {
-		klog.Errorf("发送通知 %s 失败 %v", msg, err)
-	} else {
-		klog.Infof("发送通知 %s 成功", msg)
 	}
 }
