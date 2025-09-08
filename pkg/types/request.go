@@ -207,7 +207,6 @@ type (
 		Enable    bool   `json:"enable"`
 		Type      string `json:"type"` // 支持 webhook, dingtalk, wecom
 		PushCfg   string `json:"push_cfg"`
-		Content   string `json:"content"`
 		ShortDesc string `json:"short_desc"`
 	}
 	SendNotificationRequest struct {
