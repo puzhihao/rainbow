@@ -409,13 +409,13 @@ func (s *ServerController) ListTasks(ctx context.Context, listOption types.ListO
 func (s *ServerController) UpdateTaskStatus(ctx context.Context, req *types.UpdateTaskStatusRequest) error {
 	// 任务完成后发送通知
 	if req.Status == "镜像同步完成" {
-		if err := s.test(ctx, req); err != nil {
+		if err := s.sendDoneNotify(ctx, req); err != nil {
 			klog.Errorf("任务(%d)完成后发送通知失败 %v", req.TaskId, err)
 		}
 	}
 	return s.factory.Task().UpdateDirectly(ctx, req.TaskId, map[string]interface{}{"status": req.Status, "message": req.Message, "process": req.Process})
 }
-func (s *ServerController) test(ctx context.Context, req *types.UpdateTaskStatusRequest) error {
+func (s *ServerController) sendDoneNotify(ctx context.Context, req *types.UpdateTaskStatusRequest) error {
 	// 获取该任务下的所有镜像
 	task, err := s.factory.Task().Get(ctx, req.TaskId)
 	if err != nil {
