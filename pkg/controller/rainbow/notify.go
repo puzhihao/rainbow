@@ -75,71 +75,83 @@ func (s *ServerController) CreateNotify(ctx context.Context, req *types.CreateNo
 }
 
 func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotificationRequest) error {
-	task, err := s.factory.Task().Get(ctx, req.TaskId)
-	if err != nil {
-		return fmt.Errorf("failed to get task: %w", err)
+	switch req.Role {
+	case 1: // 注册通知
+		return s.SendRegisterNotify(ctx, req)
+	case 0: // 普通通知
+		task, err := s.factory.Task().Get(ctx, req.TaskId)
+		if err != nil {
+			return fmt.Errorf("failed to get task: %w", err)
+		}
+
+		list, err := s.factory.Notify().List(ctx, db.WithUser(task.UserId), db.WithEnable(1))
+		if err != nil {
+			return fmt.Errorf("failed to query notification configs: %w", err)
+		}
+		if len(list) == 0 {
+			klog.Warningf("no enabled notification config found for user %s", task.UserId)
+			return nil
+		}
+
+		for _, n := range list {
+			if err := s.sendNotification(&n, req.Content); err != nil {
+				klog.Errorf("failed to send notification via config (ID: %d): %v", n.Id, err)
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid role: %d", req.Role)
 	}
-	list, err := s.factory.Notify().List(ctx, db.WithUser(task.UserId), db.WithEnable(1))
+}
+
+func (s *ServerController) SendRegisterNotify(ctx context.Context, req *types.SendNotificationRequest) error {
+	notifies, err := s.factory.Notify().List(ctx, db.WithRole(req.Role), db.WithEnable(1))
 	if err != nil {
 		return fmt.Errorf("failed to query notification configs: %w", err)
 	}
-	if len(list) == 0 {
-		klog.Warningf("no enabled notification config found for user %s", task.UserId)
-		return nil
-	}
 
-	for _, n := range list {
-		switch n.Type {
-		case "wecom":
-			s.SendDingdingOrWeComNotify(&n, req.Content)
-		case "dingding":
-			s.SendDingdingOrWeComNotify(&n, req.Content)
-		case "email":
-			// TODO
-		default:
-			// TODO
+	msg := fmt.Sprintf("注册通知\n用户名: %s\n时间: %v\nEmail: %s",
+		req.UserName, time.Now().Format("2006-01-02 15:04:05"), req.Email)
+
+	for _, notify := range notifies {
+		if err := s.sendNotification(&notify, msg); err != nil {
+			klog.Errorf("notify(%s) 推送失败: %v", notify.Name, err)
+			continue
 		}
+		klog.Infof("notify(%s) 推送成功", notify.Name)
 	}
 
 	return nil
 }
-func (s *ServerController) SendDingdingOrWeComNotify(req *model.Notification, msg string) error {
+
+func (s *ServerController) sendNotification(notify *model.Notification, msg string) error {
 	type Config struct {
 		Url string `json:"url"`
 	}
+
 	var cfg Config
-	if err := json.Unmarshal([]byte(req.PushCfg), &cfg); err != nil {
-		klog.Errorf("failed to parse config (ID: %d): %v", req.Id, err)
+	if err := json.Unmarshal([]byte(notify.PushCfg), &cfg); err != nil {
+		return fmt.Errorf("failed to parse config (ID: %d): %w", notify.Id, err)
 	}
+
 	if cfg.Url == "" {
-		klog.Errorf("invalid config (ID: %d): empty URL or token", req.Id)
+		return fmt.Errorf("invalid config (ID: %d): empty URL", notify.Id)
 	}
-	http := util.NewHttpClient(5*time.Second, cfg.Url)
-	if err := http.Post(cfg.Url, nil,
-		PushMessage{Text: map[string]string{"content": msg}, Msgtype: "text"}, map[string]string{"Content-Type": "application/json"}); err != nil {
-		klog.Errorf("failed to send (ID: %d): %v", req.Id, err)
-		return err
+
+	httpClient := util.NewHttpClient(5*time.Second, cfg.Url)
+	payload := PushMessage{
+		Text:    map[string]string{"content": msg},
+		Msgtype: "text",
 	}
-	klog.Infof("successfully sent notification via config (ID: %d)", req.Id)
+
+	if err := httpClient.Post(
+		cfg.Url,
+		nil,
+		payload,
+		map[string]string{"Content-Type": "application/json"},
+	); err != nil {
+		return fmt.Errorf("failed to send notification: %w", err)
+	}
+
 	return nil
 }
-
-//func (s *ServerController) SendRegisterNotify(ctx context.Context, req *types.SendNotificationRequest) error {
-//	notifies, err := s.factory.Notify().List(ctx, db.WithRole(req.Role), db.WithEnable(1))
-//	if err != nil {
-//		klog.Errorf("获取 notify 失败 %v", err)
-//		return err
-//	}
-//	for _, notify := range notifies {
-//		http := util.NewHttpClient(5*time.Second, notify.Url)
-//		msg := fmt.Sprintf("注册通知\n用户名: %s\n时间: %v\nEmail: %s", req.UserName, time.Now().Format("2006-01-02 15:04:05"), req.Email)
-//		if err = http.Post(notify.Url, nil,
-//			PushMessage{Text: map[string]string{"content": msg}, Msgtype: "text"}, map[string]string{"Content-Type": "application/json"}); err != nil {
-//			klog.Errorf("notify(%s) 推送失败 %v", notify.Name, err)
-//			continue
-//		}
-//		klog.Errorf("notify(%s) 推送成功", notify.Name)
-//	}
-//
-//	return nil
-//}
