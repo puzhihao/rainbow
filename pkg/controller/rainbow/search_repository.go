@@ -156,10 +156,11 @@ func (s *ServerController) SearchRepositoryTags(ctx context.Context, req types.R
 		return nil, err
 	}
 
-	var tagResp HubTagResponse
+	var tagResp []types.TagResult
 	if err = json.Unmarshal(val, &tagResp); err != nil {
 		return nil, err
 	}
+
 	return tagResp, nil
 }
 
@@ -190,8 +191,8 @@ func (s *ServerController) SearchRepositoryTagInfo(ctx context.Context, req type
 func (s *ServerController) doSearch(ctx context.Context, clientId string, key string, data []byte) ([]byte, error) {
 	client := GetRpcClient(clientId, RpcClients)
 	if client == nil {
-		klog.Errorf("client not connected or register")
-		return nil, fmt.Errorf("client not connected or register")
+		klog.Errorf("未发现可用的 agent，请联系管理员")
+		return nil, fmt.Errorf("未发现可用的 agent，请联系管理员")
 	}
 
 	if err := client.Send(&pb.Response{Result: data}); err != nil {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -106,7 +107,7 @@ func (s *AgentController) Search(ctx context.Context, date []byte) error {
 		return err
 	}
 
-	klog.Infof("搜索结果已暂存, key(%s)", reqMeta.RepositorySearchRequest.Query, reqMeta.Uid)
+	klog.Infof("搜索(%s)结果已暂存, key(%s)", reqMeta.RepositorySearchRequest.Query, reqMeta.Uid)
 	return nil
 }
 
@@ -121,10 +122,82 @@ func (s *AgentController) SearchRepositories(ctx context.Context, req types.Remo
 }
 
 func (s *AgentController) SearchTags(ctx context.Context, req types.RemoteTagSearchRequest) ([]byte, error) {
-	switch req.Hub {
-	case "dockerhub":
-		url := fmt.Sprintf("https://hub.docker.com/v2/repositories/%s/%s/tags?page_size=%s&page=%s", req.Namespace, req.Repository, req.PageSize, req.Page)
-		return DoHttpRequest(url)
+	cfg := req.Config
+
+	switch cfg.ImageFrom {
+	case types.ImageHubDocker:
+		var tagResults []types.TagResult
+
+		baseURL := fmt.Sprintf("https://hub.docker.com/v2/repositories/%s/%s/tags", req.Namespace, req.Repository)
+		page := cfg.Page
+
+		// TODO: 后续优化
+		// 1. 架构和策略都不限，直接获取
+		if len(cfg.Arch) == 0 && cfg.Policy == ".*" {
+			reqURL := fmt.Sprintf("%s?page_size=%s&page=%s", baseURL, fmt.Sprintf("%d", cfg.Size), fmt.Sprintf("%d", page))
+			val, err := DoHttpRequest(reqURL)
+			if err != nil {
+				return nil, err
+			}
+			var tagResp types.HubTagResponse
+			if err = json.Unmarshal(val, &tagResp); err != nil {
+				return nil, err
+			}
+			tagResults = append(tagResults, tagResp.Results...)
+		} else {
+			// 2. 架构和策略至少有一个限制，均需要递归查询
+			re, err := regexp.Compile(util.ToRegexp(cfg.Policy))
+			if err != nil {
+				return nil, err
+			}
+
+			for {
+				if len(tagResults) >= cfg.Size {
+					break
+				}
+				reqURL := fmt.Sprintf("%s?page_size=%s&page=%s", baseURL, "50", fmt.Sprintf("%d", page))
+				val, err := DoHttpRequest(reqURL)
+				if err != nil {
+					return nil, err
+				}
+				var tagResp types.HubTagResponse
+				if err = json.Unmarshal(val, &tagResp); err != nil {
+					return nil, err
+				}
+
+				for _, tag := range tagResp.Results {
+					if len(tagResults) >= cfg.Size {
+						break
+					}
+
+					if cfg.Policy != ".*" {
+						// 过滤 policy, 不符合 policy 则忽略
+						if !re.MatchString(tag.Name) {
+							continue
+						}
+					}
+					if len(cfg.Arch) != 0 {
+						newImage := make([]types.Image, 0)
+						for _, image := range tag.Images {
+							if image.Architecture == cfg.Arch {
+								newImage = append(newImage, image)
+							}
+						}
+						tag.Images = newImage // 去除不符合要求的架构镜像
+					}
+					tagResults = append(tagResults, tag)
+				}
+			}
+		}
+
+		// 去除多余的 tag
+		if len(tagResults) > cfg.Size {
+			tagResults = tagResults[:cfg.Size]
+		}
+
+		return json.Marshal(tagResults)
+	default:
+		klog.Errorf("不支持的远端仓库类型“ %v", cfg.ImageFrom)
 	}
 
 	return nil, nil
