@@ -115,10 +115,6 @@ func (s *ServerController) sendNotification(notify *model.Notification, msg stri
 		return fmt.Errorf("failed to parse config (ID: %d): %w", notify.Id, err)
 	}
 
-	if cfg.Url == "" {
-		return fmt.Errorf("invalid config (ID: %d): empty URL", notify.Id)
-	}
-
 	httpClient := util.NewHttpClient(5*time.Second, cfg.Url)
 	payload := PushMessage{
 		Text:    map[string]string{"content": msg},
