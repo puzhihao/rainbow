@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/caoyingjunz/rainbow/pkg/db/model/rainbow"
 	"time"
 
 	"k8s.io/klog/v2"
 
 	"github.com/caoyingjunz/rainbow/pkg/db"
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
+	"github.com/caoyingjunz/rainbow/pkg/db/model/rainbow"
 	"github.com/caoyingjunz/rainbow/pkg/types"
 	"github.com/caoyingjunz/rainbow/pkg/util"
 )
