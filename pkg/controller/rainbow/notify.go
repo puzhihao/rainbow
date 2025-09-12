@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	dingdingUrl = "https://oapi.dingtalk.com/robot/send?access_token="
-	WeConUrl    = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key="
+	DingTalkType = "dingtalk"
+	WeComType    = "wecom"
 )
 
 type PushMessage struct {
@@ -31,7 +31,7 @@ func (s *ServerController) CreateNotify(ctx context.Context, req *types.CreateNo
 
 	// 根据类型序列化对应的配置结构体
 	switch req.PushCfg.Type {
-	case "dingtalk":
+	case DingTalkType:
 		if req.PushCfg.DingTalkPushCfg == nil {
 			return fmt.Errorf("钉钉推送配置不能为空")
 		}
@@ -41,7 +41,7 @@ func (s *ServerController) CreateNotify(ctx context.Context, req *types.CreateNo
 			return err
 		}
 
-	case "wecom":
+	case WeComType:
 		if req.PushCfg.WeComPushCfg == nil {
 			return fmt.Errorf("企微推送配置不能为空")
 		}
@@ -76,29 +76,10 @@ func (s *ServerController) CreateNotify(ctx context.Context, req *types.CreateNo
 
 func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotificationRequest) error {
 	switch req.Role {
-	case 1: // 注册通知
+	case 1:
 		return s.SendRegisterNotify(ctx, req)
-	case 0: // 普通通知
-		task, err := s.factory.Task().Get(ctx, req.TaskId)
-		if err != nil {
-			return fmt.Errorf("failed to get task: %w", err)
-		}
-
-		list, err := s.factory.Notify().List(ctx, db.WithUser(task.UserId), db.WithEnable(1))
-		if err != nil {
-			return fmt.Errorf("failed to query notification configs: %w", err)
-		}
-		if len(list) == 0 {
-			klog.Warningf("no enabled notification config found for user %s", task.UserId)
-			return nil
-		}
-
-		for _, n := range list {
-			if err := s.sendNotification(&n, req.Content); err != nil {
-				klog.Errorf("failed to send notification via config (ID: %d): %v", n.Id, err)
-			}
-		}
-		return nil
+	case 0:
+		return s.sendMessageNotify(ctx, req)
 	default:
 		return fmt.Errorf("invalid role: %d", req.Role)
 	}
@@ -153,5 +134,21 @@ func (s *ServerController) sendNotification(notify *model.Notification, msg stri
 		return fmt.Errorf("failed to send notification: %w", err)
 	}
 
+	return nil
+}
+
+func (s *ServerController) sendMessageNotify(ctx context.Context, req *types.SendNotificationRequest) error {
+	task, err := s.factory.Task().Get(ctx, req.TaskId)
+	if err != nil {
+		return fmt.Errorf("failed to get task: %w", err)
+	}
+
+	list, err := s.factory.Notify().List(ctx, db.WithUser(task.UserId), db.WithEnable(1))
+
+	for _, n := range list {
+		if err := s.sendNotification(&n, req.Content); err != nil {
+			klog.Errorf("failed to send notification via config (ID: %d): %v", n.Id, err)
+		}
+	}
 	return nil
 }
