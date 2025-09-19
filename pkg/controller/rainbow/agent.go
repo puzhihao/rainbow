@@ -11,11 +11,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/caoyingjunz/pixiulib/exec"
 	"github.com/go-redis/redis/v8"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -45,6 +45,7 @@ type AgentController struct {
 	redisClient *redis.Client
 
 	queue workqueue.RateLimitingInterface
+	exec  exec.Interface
 
 	name     string
 	callback string
@@ -60,6 +61,7 @@ func NewAgent(f db.ShareDaoFactory, cfg rainbowconfig.Config, redisClient *redis
 		baseDir:     cfg.Agent.DataDir,
 		callback:    cfg.Plugin.Callback,
 		queue:       workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "rainbow-agent"),
+		exec:        exec.New(),
 	}
 }
 
@@ -75,12 +77,12 @@ func (s *AgentController) Search(ctx context.Context, date []byte) error {
 		err    error
 	)
 	switch reqMeta.Type {
-	case 1:
+	case types.SearchTypeRepo:
 		result, err = s.SearchRepositories(ctx, reqMeta.RepositorySearchRequest)
-	case 2:
+	case types.SearchTypeTag:
 		result, err = s.SearchTags(ctx, reqMeta.TagSearchRequest)
-	case 3:
-		result, err = s.SearchImageInfo(ctx, reqMeta.TagInfoSearchRequest)
+	case types.SearchTypeTagInfo:
+		result, err = s.SearchTagInfo(ctx, reqMeta.TagInfoSearchRequest)
 	case 4:
 		result, err = s.SyncKubernetesTags(ctx, reqMeta.KubernetesTagRequest)
 	default:
@@ -152,10 +154,11 @@ func (s *AgentController) SearchDockerhubRepositories(ctx context.Context, req t
 	}
 	var css []types.CommonSearchRepositoryResult
 	for _, rep := range searchResp.Results {
+		desc := rep.ShortDescription
 		css = append(css, types.CommonSearchRepositoryResult{
 			Name:      rep.RepoName,
 			Registry:  types.ImageHubDocker,
-			ShortDesc: &rep.ShortDescription,
+			ShortDesc: &desc,
 			Stars:     rep.StarCount,
 			Pull:      rep.PullCount,
 		})
@@ -235,7 +238,7 @@ func (s *AgentController) SearchGcrRepositories(ctx context.Context, opt types.R
 	// https://registry.k8s.io/v2/kube-apiserver/tags/list
 	// crane ls registry.k8s.io/kube-apiserver
 	if len(opt.Namespace) == 0 {
-		return nil, fmt.Errorf("gcr.io 镜像仓库搜索时，必须指定命名空间")
+		opt.Namespace = types.DefaultGCRNamespace
 	}
 
 	baseURL := fmt.Sprintf("https://gcr.io/v2/%s/tags/list", opt.Namespace)
@@ -261,97 +264,305 @@ func (s *AgentController) SearchGcrRepositories(ctx context.Context, opt types.R
 	return css, nil
 }
 
-func (s *AgentController) SearchTags(ctx context.Context, req types.RemoteTagSearchRequest) ([]byte, error) {
-	cfg := req.Config
+func (s *AgentController) runCmd(cmd []string) ([]byte, error) {
+	klog.Infof("%s is running", cmd)
+	out, err := s.exec.Command(cmd[0], cmd[1:]...).CombinedOutput()
+	if err != nil {
+		klog.Errorf("failed to run %v %v %v", cmd, string(out), err)
+		return nil, fmt.Errorf("failed to run %v %v %v", cmd, string(out), err)
+	}
 
-	switch cfg.ImageFrom {
-	case types.ImageHubDocker:
-		var tagResults []types.TagResult
+	return out, nil
+}
 
-		baseURL := fmt.Sprintf("https://hub.docker.com/v2/repositories/%s/%s/tags", req.Namespace, req.Repository)
-		page := cfg.Page
+func (s *AgentController) SearchQuayTags(ctx context.Context, req types.RemoteTagSearchRequest) ([]byte, error) {
+	// https://docs.redhat.com/en/documentation/red_hat_quay/3/html-single/red_hat_quay_api_reference/index#listrepotags
+	baseURL := fmt.Sprintf("https://quay.io/api/v1/repository/%s/%s/tag/?page=%d&limit=%d&onlyActiveTags=true", req.Namespace, req.Repository, req.Page, req.PageSize)
 
-		// TODO: 后续优化
-		// 1. 架构和策略都不限，直接获取
-		if len(cfg.Arch) == 0 && cfg.Policy == ".*" {
-			reqURL := fmt.Sprintf("%s?page_size=%s&page=%s", baseURL, fmt.Sprintf("%d", cfg.Size), fmt.Sprintf("%d", page))
-			val, err := DoHttpRequest(reqURL)
-			if err != nil {
-				return nil, err
-			}
-			var tagResp types.HubTagResponse
-			if err = json.Unmarshal(val, &tagResp); err != nil {
-				return nil, err
-			}
-			tagResults = append(tagResults, tagResp.Results...)
-		} else {
-			// 2. 架构和策略至少有一个限制，均需要递归查询
-			re, err := regexp.Compile(util.ToRegexp(cfg.Policy))
-			if err != nil {
-				return nil, err
-			}
+	switch req.SearchType {
+	case types.AccurateSearch:
+		baseURL = fmt.Sprintf("%s&specificTag=%s", baseURL, req.Query)
+	default:
+		// 默认模糊搜索
+		baseURL = fmt.Sprintf("%s&filter_tag_name=like:%s", baseURL, req.Query)
+	}
+	resp, err := DoHttpRequest(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	var quaySearchTagResult types.QuaySearchTagResult
+	if err = json.Unmarshal(resp, &quaySearchTagResult); err != nil {
+		return nil, err
+	}
 
-			for {
-				if len(tagResults) >= cfg.Size {
+	// TODO：后续在结构体直接序列化或反序列化
+	tags := make([]string, 0)
+	for _, t := range quaySearchTagResult.Tags {
+		tags = append(tags, t.Name)
+	}
+
+	pageTags := PaginateTagSlice(tags, req.Page, req.PageSize)
+	return json.Marshal(types.CommonSearchTagResult{
+		Hub:        types.ImageHubQuay,
+		Namespace:  req.Namespace,
+		Repository: req.Repository,
+		Total:      len(tags),
+		PageSize:   req.PageSize,
+		Page:       req.Page,
+		Tags:       pageTags,
+	})
+}
+
+func (s *AgentController) SearchDockerhubTags(ctx context.Context, req types.RemoteTagSearchRequest) ([]byte, error) {
+	repo := fmt.Sprintf("%s/%s", req.Namespace, req.Repository)
+	tokenResp, err := DoHttpRequest(fmt.Sprintf("https://auth.docker.io/token?service=registry.docker.io&scope=repository:%s:pull", repo))
+	if err != nil {
+		return nil, err
+	}
+	var t types.DockerToken
+	if err = json.Unmarshal(tokenResp, &t); err != nil {
+		return nil, err
+	}
+
+	baseURL := fmt.Sprintf("https://registry-1.docker.io/v2/%s/tags/list", repo)
+	resp, err := DoHttpRequestWithHeader(baseURL, map[string]string{"Authorization": fmt.Sprintf("Bearer %s", t.Token)})
+	if err != nil {
+		return nil, err
+	}
+	var ds types.DockerhubSearchTagResult
+	if err = json.Unmarshal(resp, &ds); err != nil {
+		return nil, err
+	}
+
+	var tags []string
+	if len(req.Query) != 0 {
+		// 搜索场景
+		switch req.SearchType {
+		case types.AccurateSearch:
+			// 精准查询只会有一个命中
+			// TODO 优化，直接获取目标 tag 即可
+			for _, tg := range ds.Tags {
+				if tg == req.Query {
+					tags = append(tags, tg)
 					break
 				}
-				reqURL := fmt.Sprintf("%s?page_size=%s&page=%s", baseURL, "100", fmt.Sprintf("%d", page))
-				klog.Infof("开始调用 %s 获取镜像tag", reqURL)
-				val, err := DoHttpRequest(reqURL)
-				if err != nil {
-					klog.Errorf("url(%s)请求失败 %v", reqURL, err)
-					return nil, err
+			}
+		default:
+			for _, tg := range ds.Tags {
+				if strings.Contains(tg, req.Query) {
+					tags = append(tags, tg)
 				}
-				var tagResp types.HubTagResponse
-				if err = json.Unmarshal(val, &tagResp); err != nil {
-					klog.Errorf("序列化 tag 失败 %v", err)
-					return nil, err
-				}
-
-				for _, tag := range tagResp.Results {
-					if len(tagResults) >= cfg.Size {
-						break
-					}
-
-					if cfg.Policy != ".*" {
-						// 过滤 policy, 不符合 policy 则忽略
-						if !re.MatchString(tag.Name) {
-							continue
-						}
-					}
-					if len(cfg.Arch) != 0 {
-						newImage := make([]types.Image, 0)
-						for _, image := range tag.Images {
-							if image.Architecture == cfg.Arch {
-								newImage = append(newImage, image)
-							}
-						}
-						tag.Images = newImage // 去除不符合要求的架构镜像
-					}
-					tagResults = append(tagResults, tag)
-				}
-				page++
 			}
 		}
-
-		// 去除多余的 tag
-		if len(tagResults) > cfg.Size {
-			tagResults = tagResults[:cfg.Size]
-		}
-
-		return json.Marshal(tagResults)
-	default:
-		klog.Errorf("不支持的远端仓库类型“ %v", cfg.ImageFrom)
+	} else {
+		// 全局场景
+		tags = ds.Tags
 	}
+
+	pageTags := PaginateTagSlice(tags, req.Page, req.PageSize)
+	return json.Marshal(types.CommonSearchTagResult{
+		Hub:        types.ImageHubDocker,
+		Namespace:  req.Namespace,
+		Repository: req.Repository,
+		Total:      len(tags),
+		PageSize:   req.PageSize,
+		Page:       req.Page,
+		Tags:       pageTags,
+	})
+}
+
+func (s *AgentController) SearchGCRTags(ctx context.Context, req types.RemoteTagSearchRequest) ([]byte, error) {
+	baseURL := fmt.Sprintf("https://gcr.io/v2/%s/%s/tags/list", req.Namespace, req.Repository)
+
+	resp, err := DoHttpRequest(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	var gCRSearchTagResult types.GCRSearchTagResult
+	if err = json.Unmarshal(resp, &gCRSearchTagResult); err != nil {
+		return nil, err
+	}
+
+	var tags []string
+	if len(req.Query) != 0 {
+		// 搜索场景
+		switch req.SearchType {
+		case types.AccurateSearch:
+			// 精准查询只会有一个命中
+			// TODO 优化，直接获取目标 tag 即可
+			for _, tg := range gCRSearchTagResult.Tags {
+				if tg == req.Query {
+					tags = append(tags, tg)
+					break
+				}
+			}
+		default:
+			for _, tg := range gCRSearchTagResult.Tags {
+				if strings.Contains(tg, req.Query) {
+					tags = append(tags, tg)
+				}
+			}
+		}
+	} else {
+		// 全局场景
+		tags = gCRSearchTagResult.Tags
+	}
+
+	pageTags := PaginateTagSlice(tags, req.Page, req.PageSize)
+	return json.Marshal(types.CommonSearchTagResult{
+		Hub:        types.ImageHubGCR,
+		Namespace:  req.Namespace,
+		Repository: req.Repository,
+		Total:      len(tags),
+		PageSize:   req.PageSize,
+		Page:       req.Page,
+		Tags:       pageTags,
+	})
+}
+
+func (s *AgentController) SearchTags(ctx context.Context, req types.RemoteTagSearchRequest) ([]byte, error) {
+	switch req.Hub {
+	case types.ImageHubQuay:
+		return s.SearchQuayTags(ctx, req)
+	case types.ImageHubDocker:
+		return s.SearchDockerhubTags(ctx, req)
+	case types.ImageHubGCR:
+		return s.SearchGCRTags(ctx, req)
+	}
+
+	return nil, fmt.Errorf("unsupported hub type %s", req.Hub)
+	//switch cfg.ImageFrom {
+	//case types.ImageHubDocker:
+	//	var tagResults []types.TagResult
+	//
+	//	baseURL := fmt.Sprintf("https://hub.docker.com/v2/repositories/%s/%s/tags", req.Namespace, req.Repository)
+	//	page := cfg.Page
+	//
+	//	// TODO: 后续优化
+	//	// 1. 架构和策略都不限，直接获取
+	//	if len(cfg.Arch) == 0 && cfg.Policy == ".*" {
+	//		reqURL := fmt.Sprintf("%s?page_size=%s&page=%s", baseURL, fmt.Sprintf("%d", cfg.Size), fmt.Sprintf("%d", page))
+	//		val, err := DoHttpRequest(reqURL)
+	//		if err != nil {
+	//			return nil, err
+	//		}
+	//		var tagResp types.HubTagResponse
+	//		if err = json.Unmarshal(val, &tagResp); err != nil {
+	//			return nil, err
+	//		}
+	//		tagResults = append(tagResults, tagResp.Results...)
+	//	} else {
+	//		// 2. 架构和策略至少有一个限制，均需要递归查询
+	//		re, err := regexp.Compile(util.ToRegexp(cfg.Policy))
+	//		if err != nil {
+	//			return nil, err
+	//		}
+	//
+	//		for {
+	//			if len(tagResults) >= cfg.Size {
+	//				break
+	//			}
+	//			reqURL := fmt.Sprintf("%s?page_size=%s&page=%s", baseURL, "100", fmt.Sprintf("%d", page))
+	//			klog.Infof("开始调用 %s 获取镜像tag", reqURL)
+	//			val, err := DoHttpRequest(reqURL)
+	//			if err != nil {
+	//				klog.Errorf("url(%s)请求失败 %v", reqURL, err)
+	//				return nil, err
+	//			}
+	//			var tagResp types.HubTagResponse
+	//			if err = json.Unmarshal(val, &tagResp); err != nil {
+	//				klog.Errorf("序列化 tag 失败 %v", err)
+	//				return nil, err
+	//			}
+	//
+	//			for _, tag := range tagResp.Results {
+	//				if len(tagResults) >= cfg.Size {
+	//					break
+	//				}
+	//
+	//				if cfg.Policy != ".*" {
+	//					// 过滤 policy, 不符合 policy 则忽略
+	//					if !re.MatchString(tag.Name) {
+	//						continue
+	//					}
+	//				}
+	//				if len(cfg.Arch) != 0 {
+	//					newImage := make([]types.Image, 0)
+	//					for _, image := range tag.Images {
+	//						if image.Architecture == cfg.Arch {
+	//							newImage = append(newImage, image)
+	//						}
+	//					}
+	//					tag.Images = newImage // 去除不符合要求的架构镜像
+	//				}
+	//				tagResults = append(tagResults, tag)
+	//			}
+	//			page++
+	//		}
+	//	}
+	//
+	//	// 去除多余的 tag
+	//	if len(tagResults) > cfg.Size {
+	//		tagResults = tagResults[:cfg.Size]
+	//	}
+	//
+	//	return json.Marshal(tagResults)
+	//default:
+	//	klog.Errorf("不支持的远端仓库类型“ %v", cfg.ImageFrom)
+	//}
+}
+
+func (s *AgentController) SearchDockerhubTagInfo(ctx context.Context, req types.RemoteTagInfoSearchRequest) ([]byte, error) {
+	url := fmt.Sprintf("https://hub.docker.com/v2/repositories/%s/%s/tags/%s/", req.Namespace, req.Repository, req.Tag)
+	resp, err := DoHttpRequest(url)
+	if err != nil {
+		return nil, err
+	}
+
+	var searchDockerhubImageResult types.SearchDockerhubTagInfoResult
+	if err = json.Unmarshal(resp, &searchDockerhubImageResult); err != nil {
+		return nil, err
+	}
+	return json.Marshal(types.CommonSearchTagInfoResult{
+		Name:     req.Tag,
+		FullSize: searchDockerhubImageResult.FullSize,
+		Digest:   searchDockerhubImageResult.Digest,
+		Images:   searchDockerhubImageResult.Images,
+	})
+}
+
+func (s *AgentController) SearchGCRagInfo(ctx context.Context, req types.RemoteTagInfoSearchRequest) ([]byte, error) {
+	repo := fmt.Sprintf("%s/%s/%s:%s", req.Hub, req.Namespace, req.Repository, req.Tag)
+	manifest, err := s.GetImageManifest(repo)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println(manifest)
 
 	return nil, nil
 }
 
-func (s *AgentController) SearchImageInfo(ctx context.Context, req types.RemoteTagInfoSearchRequest) ([]byte, error) {
+func (s *AgentController) GetImageManifest(repo string) (types.ImageManifest, error) {
+	cmd := []string{"crane", "manifest", repo}
+	d, err := s.runCmd(cmd)
+	if err != nil {
+		return types.ImageManifest{}, err
+	}
+
+	var m types.ImageManifest
+	if err = json.Unmarshal(d, &m); err != nil {
+		return types.ImageManifest{}, err
+	}
+
+	return m, nil
+}
+
+func (s *AgentController) SearchTagInfo(ctx context.Context, req types.RemoteTagInfoSearchRequest) ([]byte, error) {
 	switch req.Hub {
-	case "dockerhub":
-		url := fmt.Sprintf("https://hub.docker.com/v2/repositories/%s/%s/tags/%s/", req.Namespace, req.Repository, req.Tag)
-		return DoHttpRequest(url)
+	case types.ImageHubDocker:
+		return s.SearchDockerhubTagInfo(ctx, req)
+	case types.ImageHubGCR:
+		return s.SearchGCRagInfo(ctx, req)
 	}
 	return nil, nil
 }
