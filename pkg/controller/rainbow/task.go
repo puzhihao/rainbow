@@ -30,9 +30,8 @@ const (
 )
 
 func (s *ServerController) preCreateTask(ctx context.Context, req *types.CreateTaskRequest) error {
-	parts := strings.Split(req.Architecture, "/")
-	if len(parts) != 2 && len(parts) != 3 {
-		return fmt.Errorf("架构不符合要求，仅支持<操作系统>/<架构> 或 <操作系统>/<架构>/<variant> 格式")
+	if err := ValidateArch(req.Architecture); err != nil {
+		return err
 	}
 
 	if req.Type == 1 {
@@ -272,26 +271,6 @@ func (s *ServerController) CreateImageWithTag(ctx context.Context, taskId int64,
 	return nil
 }
 
-func ParseImageItem(image string) (string, string, error) {
-	parts := strings.Split(image, ":")
-	if len(parts) > 2 || len(parts) == 0 {
-		return "", "", fmt.Errorf("不合规镜像名称 %s", image)
-	}
-
-	path := parts[0]
-	tag := "latest"
-	if len(parts) == 2 {
-		tag = parts[1]
-	}
-
-	// 如果镜像是以 docker.io 开关，则去除 docker.io
-	if strings.HasPrefix(path, "docker.io/") {
-		path = strings.Replace(path, "docker.io/", "", 1)
-	}
-
-	return path, tag, nil
-}
-
 func (s *ServerController) UpdateTask(ctx context.Context, req *types.UpdateTaskRequest) error {
 	if err := s.factory.Task().Update(ctx, req.Id, req.ResourceVersion, map[string]interface{}{
 		"register_id": req.RegisterId,
@@ -475,10 +454,8 @@ func (s *ServerController) preCreateSubscribe(ctx context.Context, req *types.Cr
 	if req.Size > 50 {
 		return fmt.Errorf("订阅镜像版本数超过阈值 50")
 	}
-
-	parts := strings.Split(req.Arch, "/")
-	if len(parts) != 2 && len(parts) != 3 {
-		return fmt.Errorf("架构不符合要求，仅支持<操作系统>/<架构> 或 <操作系统>/<架构>/<variant> 格式")
+	if err := ValidateArch(req.Arch); err != nil {
+		return err
 	}
 
 	return nil
@@ -539,11 +516,9 @@ func (s *ServerController) CreateSubscribe(ctx context.Context, req *types.Creat
 }
 
 func (s *ServerController) UpdateSubscribe(ctx context.Context, req *types.UpdateSubscribeRequest) error {
-	parts := strings.Split(req.Arch, "/")
-	if len(parts) != 2 && len(parts) != 3 {
-		return fmt.Errorf("架构不符合要求，仅支持<操作系统>/<架构> 或 <操作系统>/<架构>/<variant> 格式")
+	if err := ValidateArch(req.Arch); err != nil {
+		return err
 	}
-
 	update := map[string]interface{}{
 		"size":       req.Size,
 		"interval":   req.Interval,
