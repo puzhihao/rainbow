@@ -45,6 +45,8 @@ type Config struct {
 	Server   ServerOption   `yaml:"server"`
 	Rainbowd RainbowdOption `yaml:"rainbowd"`
 
+	Rocketmq RocketmqOption `yaml:"rocketmq"`
+
 	Plugin   PluginOption `yaml:"plugin"`
 	Registry Registry     `yaml:"registry"`
 
@@ -72,6 +74,18 @@ type RainbowdOption struct {
 	TemplateDir string `yaml:"template_dir"`
 	DataDir     string `yaml:"data_dir"`
 	AgentImage  string `yaml:"agent_image"`
+}
+
+type RocketmqOption struct {
+	NameServers []string   `yaml:"name_servers"`
+	GroupName   string     `yaml:"group_name"`
+	Topic       string     `yaml:"topic"`
+	Credential  Credential `yaml:"credential"`
+}
+
+type Credential struct {
+	AccessKey string `yaml:"access_key"`
+	SecretKey string `yaml:"secret_key"`
 }
 
 func (r *RainbowdOption) SetDefault() {
@@ -116,16 +130,15 @@ type MysqlOptions struct {
 
 type RedisOption struct {
 	Addr     string `yaml:"addr"`
+	Username string `yaml:"username"`
 	Password string `yaml:"password"`
 	Db       int    `yaml:"db"`
 }
 
 type AgentOption struct {
-	Name        string `yaml:"name"`
-	DataDir     string `yaml:"data_dir"`
-	RpcServer   string `yaml:"rpc_server"`
-	RetainDays  int    `yaml:"retain_days"`
-	HealthzPort int    `yaml:"healthz_port"`
+	Name       string `yaml:"name"`
+	DataDir    string `yaml:"data_dir"`
+	RetainDays int    `yaml:"retain_days"`
 }
 
 type RateLimitOption struct {

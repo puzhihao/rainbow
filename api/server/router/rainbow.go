@@ -50,6 +50,11 @@ func (cr *rainbowRouter) initRoutes(httpEngine *gin.Engine) {
 		taskRoute.GET(":Id/messages", cr.listTaskMessages)
 	}
 
+	archRoute := httpEngine.Group("/rainbow/architectures")
+	{
+		archRoute.GET("", cr.listArchitectures)
+	}
+
 	subscribeRoute := httpEngine.Group("/rainbow/subscribes")
 	{
 		subscribeRoute.POST("", cr.createSubscribe)
@@ -165,7 +170,7 @@ func (cr *rainbowRouter) initRoutes(httpEngine *gin.Engine) {
 	repoRoute := httpEngine.Group("/rainbow/search")
 	{
 		repoRoute.GET("/repositories", cr.searchRepositories)
-		repoRoute.GET("/repositories/:namespace/:name/tags", cr.searchRepositoryTags)
+		repoRoute.GET("/repositories/tags", cr.searchRepositoryTags)
 		repoRoute.GET("/repositories/:namespace/:name/tags/:tag", cr.searchRepositoryTagInfo)
 	}
 

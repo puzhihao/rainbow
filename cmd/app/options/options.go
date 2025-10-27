@@ -2,7 +2,9 @@ package options
 
 import (
 	"fmt"
-	"math/rand"
+	"github.com/apache/rocketmq-client-go/v2"
+	"github.com/apache/rocketmq-client-go/v2/primitive"
+	"github.com/apache/rocketmq-client-go/v2/producer"
 	"os"
 	"time"
 
@@ -36,6 +38,7 @@ type Options struct {
 	Factory rainbowdb.ShareDaoFactory
 
 	RedisClient *redis.Client
+	Producer    rocketmq.Producer
 
 	HttpEngine *gin.Engine
 	Controller controller.RainbowInterface
@@ -74,12 +77,6 @@ func (o *Options) Complete() error {
 	if o.ComponentConfig.Agent.RetainDays == 0 {
 		o.ComponentConfig.Agent.RetainDays = defaultRetainDays
 	}
-	if o.ComponentConfig.Agent.HealthzPort == 0 {
-		// 临时处理
-		rand.Seed(time.Now().UnixNano())
-		min, max := 1000, 5000
-		o.ComponentConfig.Agent.HealthzPort = rand.Intn(max-min+1) + min
-	}
 	if o.ComponentConfig.Default.Listen == 0 {
 		o.ComponentConfig.Default.Listen = defaultListen
 	}
@@ -92,7 +89,27 @@ func (o *Options) Complete() error {
 		return err
 	}
 
-	o.Controller = controller.New(o.ComponentConfig, o.Factory, o.RedisClient)
+	if err := o.registerProducer(); err != nil {
+		return err
+	}
+
+	o.Controller = controller.New(o.ComponentConfig, o.Factory, o.RedisClient, o.Producer)
+	return nil
+}
+
+func (o *Options) registerProducer() error {
+	rocketmqConfig := o.ComponentConfig.Rocketmq
+	p, err := rocketmq.NewProducer(
+		producer.WithNameServer(rocketmqConfig.NameServers), // NameServer地址
+		producer.WithRetry(3),                               // 重试次数
+		producer.WithGroupName(rocketmqConfig.GroupName),    // 生产者组名
+		producer.WithCredentials(primitive.Credentials{AccessKey: rocketmqConfig.Credential.AccessKey, SecretKey: rocketmqConfig.Credential.SecretKey}),
+	)
+	if err != nil {
+		return err
+	}
+
+	o.Producer = p
 	return nil
 }
 
@@ -127,6 +144,7 @@ func (o *Options) registerRedis() error {
 	redisConfig := o.ComponentConfig.Redis
 	o.RedisClient = redis.NewClient(&redis.Options{
 		Addr:        redisConfig.Addr,
+		Username:    redisConfig.Username,
 		Password:    redisConfig.Password,
 		DB:          redisConfig.Db,
 		ReadTimeout: 10 * time.Second,

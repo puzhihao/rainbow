@@ -20,10 +20,20 @@ import (
 
 const (
 	TaskWaitStatus  = "调度中"
-	HuaweiNamespace = "pixiu-public"
+	HuaweiNamespace = "pixiu-public" // pixiuHub 内置默认外部命名空间
+)
+
+const (
+	defaultNamespace = "emptyNamespace" // pixiuHub 内置默认空命名空间
+	defaultArch      = "linux/amd64"
+	defaultDriver    = "skopeo"
 )
 
 func (s *ServerController) preCreateTask(ctx context.Context, req *types.CreateTaskRequest) error {
+	if err := ValidateArch(req.Architecture); err != nil {
+		return err
+	}
+
 	if req.Type == 1 {
 		if !strings.HasPrefix(req.KubernetesVersion, "v1.") {
 			return fmt.Errorf("invaild kubernetes version (%s)", req.KubernetesVersion)
@@ -46,11 +56,6 @@ func (s *ServerController) preCreateTask(ctx context.Context, req *types.CreateT
 	return nil
 }
 
-const (
-	defaultNamespace = "emptyNamespace"
-	defaultArch      = "amd64"
-)
-
 func (s *ServerController) CreateTask(ctx context.Context, req *types.CreateTaskRequest) error {
 	if err := s.preCreateTask(ctx, req); err != nil {
 		klog.Errorf("创建任务前置检查未通过 %v", err)
@@ -61,22 +66,18 @@ func (s *ServerController) CreateTask(ctx context.Context, req *types.CreateTask
 	if len(strings.TrimSpace(req.Name)) == 0 {
 		req.Name = uuid.NewRandName("", 8)
 	}
+	req.Namespace = WrapNamespace(req.Namespace, req.UserName)
+
 	// 初始化仓库
 	if req.RegisterId == 0 {
 		req.RegisterId = *RegistryId
 	}
 
-	if len(req.Namespace) == 0 {
-		req.Namespace = strings.ToLower(req.UserName)
-	}
-	if req.Namespace == defaultNamespace {
-		req.Namespace = ""
-	}
 	if len(req.Architecture) == 0 {
 		req.Architecture = defaultArch
 	}
 	if len(req.Driver) == 0 {
-		req.Driver = "skopeo"
+		req.Driver = defaultDriver
 	}
 
 	// 如果是k8s类型的镜像，则由 plugin 回调创建
@@ -270,26 +271,6 @@ func (s *ServerController) CreateImageWithTag(ctx context.Context, taskId int64,
 	return nil
 }
 
-func ParseImageItem(image string) (string, string, error) {
-	parts := strings.Split(image, ":")
-	if len(parts) > 2 || len(parts) == 0 {
-		return "", "", fmt.Errorf("不合规镜像名称 %s", image)
-	}
-
-	path := parts[0]
-	tag := "latest"
-	if len(parts) == 2 {
-		tag = parts[1]
-	}
-
-	// 如果镜像是以 docker.io 开关，则去除 docker.io
-	if strings.HasPrefix(path, "docker.io/") {
-		path = strings.Replace(path, "docker.io/", "", 1)
-	}
-
-	return path, tag, nil
-}
-
 func (s *ServerController) UpdateTask(ctx context.Context, req *types.UpdateTaskRequest) error {
 	if err := s.factory.Task().Update(ctx, req.Id, req.ResourceVersion, map[string]interface{}{
 		"register_id": req.RegisterId,
@@ -469,16 +450,12 @@ func (s *ServerController) DeleteTasksByIds(ctx context.Context, ids []int64) er
 }
 
 func (s *ServerController) preCreateSubscribe(ctx context.Context, req *types.CreateSubscribeRequest) error {
-	if req.Size > 100 {
-		return fmt.Errorf("订阅镜像版本数超过阈值 100")
+	// 订阅默认不超过 20
+	if req.Size > 50 {
+		return fmt.Errorf("订阅镜像版本数超过阈值 50")
 	}
-
-	old, err := s.factory.Task().ListSubscribes(ctx, db.WithPath(req.Path), db.WithUser(req.UserId))
-	if err != nil {
-		return fmt.Errorf("创建前置检查时，获取订阅列表失败 %v", err)
-	}
-	if len(old) != 0 {
-		return fmt.Errorf("用户(%s)已存在订阅镜像(%s)，无法重复创建", req.UserName, req.Path)
+	if err := ValidateArch(req.Arch); err != nil {
+		return err
 	}
 
 	return nil
@@ -495,45 +472,61 @@ func (s *ServerController) CreateSubscribe(ctx context.Context, req *types.Creat
 		return fmt.Errorf("不合规镜像名称 %s", req.Path)
 	}
 
-	ns := req.Namespace
-	if len(ns) == 0 {
-		ns = strings.ToLower(req.UserName)
-	}
-	if ns == defaultNamespace {
-		ns = ""
-	}
+	ns := WrapNamespace(req.Namespace, req.UserName)
 	if len(ns) != 0 {
 		srcPath = ns + "/" + srcPath
 	}
 
-	rawPath := req.Path
-	parts := strings.Split(rawPath, "/")
-	if len(parts) != 1 && len(parts) != 2 {
-		return fmt.Errorf("订阅镜像名称路径不符合要求")
+	// 初始化镜像来源
+	if len(req.ImageFrom) == 0 {
+		req.ImageFrom = types.ImageHubDocker
 	}
 
-	if len(parts) == 1 {
-		rawPath = "library" + "/" + rawPath
+	rawPath := req.Path
+	// 默认dockerhub不指定 ns时，会添加默认值
+	if req.ImageFrom == types.ImageHubDocker {
+		parts := strings.Split(rawPath, "/")
+		if len(parts) == 1 {
+			rawPath = types.DefaultDockerhubNamespace + "/" + rawPath
+		}
 	}
+
+	req.Policy = strings.TrimSpace(req.Policy)
+	if len(req.Policy) == 0 {
+		req.Policy = "latest"
+	}
+
 	return s.factory.Task().CreateSubscribe(ctx, &model.Subscribe{
 		UserModel: rainbow.UserModel{
 			UserId:   req.UserId,
 			UserName: req.UserName,
 		},
-		Namespace: req.Namespace,
+		Namespace: ns,
 		Path:      req.Path,
 		RawPath:   rawPath,
 		SrcPath:   srcPath,
 		Enable:    req.Enable,   // 是否启动订阅
 		Size:      req.Size,     // 最多同步多少个版本
 		Interval:  req.Interval, // 多久执行一次
+		ImageFrom: req.ImageFrom,
+		Policy:    req.Policy,
+		Arch:      req.Arch,
+		Rewrite:   req.Rewrite,
 	})
 }
 
 func (s *ServerController) UpdateSubscribe(ctx context.Context, req *types.UpdateSubscribeRequest) error {
+	if err := ValidateArch(req.Arch); err != nil {
+		return err
+	}
 	update := map[string]interface{}{
-		"size":     req.Size,
-		"interval": req.Interval,
+		"size":       req.Size,
+		"interval":   req.Interval,
+		"image_from": req.ImageFrom,
+		"policy":     req.Policy,
+		"arch":       req.Arch,
+		"rewrite":    req.Rewrite,
+		"namespace":  req.Namespace,
 	}
 
 	enable := req.Enable
@@ -551,6 +544,12 @@ func (s *ServerController) UpdateSubscribe(ctx context.Context, req *types.Updat
 				msg = fmt.Sprintf("手动关闭制品订阅")
 			}
 			s.CreateSubscribeMessageWithLog(ctx, *old, msg)
+
+			// 同步更新（订正）命名空间
+			newNS := WrapNamespace(req.Namespace, old.UserName)
+			if newNS != old.Namespace {
+				update["namespace"] = newNS
+			}
 		}
 	}
 
@@ -560,8 +559,22 @@ func (s *ServerController) UpdateSubscribe(ctx context.Context, req *types.Updat
 	return nil
 }
 
+// DeleteSubscribe 删除订阅
+// 1. 删除订阅
+// 2. 删除订阅记录
+// 3. 删除订阅关联的同步任务
 func (s *ServerController) DeleteSubscribe(ctx context.Context, subId int64) error {
-	return s.factory.Task().DeleteSubscribe(ctx, subId)
+	if err := s.factory.Task().DeleteSubscribe(ctx, subId); err != nil {
+		return err
+	}
+	if err := s.factory.Task().DeleteSubscribeAllMessage(ctx, subId); err != nil {
+		return err
+	}
+	if err := s.factory.Task().DeleteBySubscribe(ctx, subId); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *ServerController) preCreateAgent(ctx context.Context, req *types.CreateAgentRequest) error {
@@ -593,10 +606,6 @@ func (s *ServerController) CreateAgent(ctx context.Context, req *types.CreateAge
 		return err
 	}
 
-	if req.HealthzPort == 0 {
-		// 未做去重，暂时人工确认
-		req.HealthzPort = util.GenRandInt(10086, 10186)
-	}
 	if len(req.GithubRepository) == 0 {
 		req.GithubRepository = fmt.Sprintf("https://github.com/%s/plugin.git", req.GithubUser)
 	}
@@ -607,7 +616,6 @@ func (s *ServerController) CreateAgent(ctx context.Context, req *types.CreateAge
 		GithubToken:      req.GithubToken,
 		GithubRepository: req.GithubRepository,
 		GithubEmail:      req.GithubEmail,
-		HealthzPort:      req.HealthzPort,
 		Type:             req.Type,
 		RainbowdName:     req.RainbowdName,
 		Status:           model.UnStartType,

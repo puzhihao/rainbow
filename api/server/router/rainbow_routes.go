@@ -2,6 +2,7 @@ package router
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -641,7 +642,6 @@ func (cr *rainbowRouter) listAgents(c *gin.Context) {
 		httputils.SetFailed(c, resp, err)
 		return
 	}
-
 	if resp.Result, err = cr.c.Server().ListAgents(c, listOption); err != nil {
 		httputils.SetFailed(c, resp, err)
 		return
@@ -1131,10 +1131,7 @@ func (cr *rainbowRouter) searchRepositories(c *gin.Context) {
 		httputils.SetFailed(c, resp, err)
 		return
 	}
-	// TODO: 默认值自动设置
-	if len(req.Hub) == 0 {
-		req.Hub = "dockerhub"
-	}
+	req.Query = strings.TrimSpace(req.Query)
 	if resp.Result, err = cr.c.Server().SearchRepositories(c, req); err != nil {
 		httputils.SetFailed(c, resp, err)
 		return
@@ -1147,20 +1144,17 @@ func (cr *rainbowRouter) searchRepositoryTags(c *gin.Context) {
 	resp := httputils.NewResponse()
 
 	var (
-		req      types.RemoteTagSearchRequest
-		nameMeta types.NameMeta
-		err      error
+		req types.RemoteTagSearchRequest
+		err error
 	)
-	if err = httputils.ShouldBindAny(c, nil, &nameMeta, &req); err != nil {
+	if err = httputils.ShouldBindAny(c, nil, nil, &req); err != nil {
 		httputils.SetFailed(c, resp, err)
 		return
 	}
-	req.Repository = nameMeta.Name
-	req.Namespace = nameMeta.Namespace
 	if len(req.Hub) == 0 {
 		req.Hub = "dockerhub"
 	}
-
+	req.Query = strings.TrimSpace(req.Query)
 	if resp.Result, err = cr.c.Server().SearchRepositoryTags(c, req); err != nil {
 		httputils.SetFailed(c, resp, err)
 		return
@@ -1374,6 +1368,20 @@ func (cr *rainbowRouter) listTaskMessages(c *gin.Context) {
 		return
 	}
 	if resp.Result, err = cr.c.Server().ListTaskMessages(c, idMeta.ID); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+
+	httputils.SetSuccess(c, resp)
+}
+
+func (cr *rainbowRouter) listArchitectures(c *gin.Context) {
+	resp := httputils.NewResponse()
+
+	var (
+		err error
+	)
+	if resp.Result, err = cr.c.Server().ListArchitectures(c, types.ListOptions{}); err != nil {
 		httputils.SetFailed(c, resp, err)
 		return
 	}

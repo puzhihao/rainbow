@@ -10,12 +10,12 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/apache/rocketmq-client-go/v2/consumer"
+	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/caoyingjunz/pixiulib/exec"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"gopkg.in/yaml.v3"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	rainbowconfig "github.com/caoyingjunz/rainbow/cmd/app/config"
@@ -30,6 +30,7 @@ type RainbowdGetter interface {
 
 type Interface interface {
 	Run(ctx context.Context, workers int) error
+	Subscribe(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error)
 }
 
 type rainbowdController struct {
@@ -37,7 +38,6 @@ type rainbowdController struct {
 	factory db.ShareDaoFactory
 	cfg     rainbowconfig.Config
 	exec    exec.Interface
-	queue   workqueue.RateLimitingInterface
 }
 
 func New(f db.ShareDaoFactory, cfg rainbowconfig.Config) *rainbowdController {
@@ -46,8 +46,30 @@ func New(f db.ShareDaoFactory, cfg rainbowconfig.Config) *rainbowdController {
 		cfg:     cfg,
 		name:    cfg.Rainbowd.Name,
 		exec:    exec.New(),
-		queue:   workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "rainbowd"),
 	}
+}
+
+func (s *rainbowdController) Subscribe(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
+	for _, msg := range msgs {
+		klog.V(0).Infof("收到消息: Topic=%s, MessageID=%s, Body=%s", msg.Topic, msg.MsgId, string(msg.Body))
+		if err := s.handler(ctx, string(msg.Body)); err != nil {
+			klog.Errorf("处理 rainbowd 服务失败 %v", err)
+		}
+	}
+	return consumer.ConsumeSuccess, nil
+}
+
+func (s *rainbowdController) handler(ctx context.Context, key string) error {
+	agentId, resourceVersion, err := util.KeyFunc(key)
+	if err != nil {
+		return fmt.Errorf("解析获取到的 key %s 失败 %v", key, err)
+	}
+	if err = s.sync(ctx, agentId, resourceVersion); err != nil {
+		_ = s.factory.Agent().Update(context.TODO(), agentId, resourceVersion, map[string]interface{}{"status": model.ErrorAgentType, "message": err.Error()})
+		return fmt.Errorf("同步agent状态失败 %v", err)
+	}
+
+	return nil
 }
 
 func (s *rainbowdController) Run(ctx context.Context, workers int) error {
@@ -56,12 +78,8 @@ func (s *rainbowdController) Run(ctx context.Context, workers int) error {
 		return err
 	}
 
-	go s.getNextWorkItems(ctx)
-	go s.startHealthChecker(ctx) // 可用性检查
-
-	for i := 0; i < workers; i++ {
-		go wait.UntilWithContext(ctx, s.worker, 1*time.Second)
-	}
+	// TODO
+	//go s.startHealthChecker(ctx) // 可用性检查
 
 	return nil
 }
@@ -81,31 +99,6 @@ func (s *rainbowdController) RegisterIfNotExist(ctx context.Context) error {
 		Status: model.RunAgentType,
 	})
 	return nil
-}
-
-func (s *rainbowdController) worker(ctx context.Context) {
-	for s.processNextWorkItem(ctx) {
-	}
-}
-
-func (s *rainbowdController) processNextWorkItem(ctx context.Context) bool {
-	key, quit := s.queue.Get()
-	if quit {
-		return false
-	}
-	defer s.queue.Done(key)
-
-	agentId, resourceVersion, err := util.KeyFunc(key)
-	if err != nil {
-		s.handleErr(ctx, err, key)
-	} else {
-		if err = s.sync(ctx, agentId, resourceVersion); err != nil {
-			_ = s.factory.Agent().Update(context.TODO(), agentId, resourceVersion, map[string]interface{}{"status": model.ErrorAgentType, "message": err.Error()})
-			s.handleErr(ctx, err, key)
-		}
-	}
-
-	return true
 }
 
 func (s *rainbowdController) startHealthChecker(ctx context.Context) {
@@ -137,7 +130,7 @@ func (s *rainbowdController) startHealthChecker(ctx context.Context) {
 
 // 一次失败就直接重启
 func (s *rainbowdController) doCheck(agent model.Agent) error {
-	cmd := []string{"docker", "exec", agent.Name, "curl", "-s", "-o", "/dev/null", "-w", `"%{http_code}"`, "-X", "POST", fmt.Sprintf("http://127.0.0.1:%d/healthz", agent.HealthzPort)}
+	cmd := []string{"docker", "exec", agent.Name, "curl", "-s", "-o", "/dev/null", "-w", `"%{http_code}"`, "-X", "POST", fmt.Sprintf("http://127.0.0.1:%d/healthz", 10086)}
 	out, err := s.exec.Command(cmd[0], cmd[1:]...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to exec %s container %v", string(out), err)
@@ -147,35 +140,6 @@ func (s *rainbowdController) doCheck(agent model.Agent) error {
 		return nil
 	}
 	return fmt.Errorf("%s", string(out))
-}
-
-func (s *rainbowdController) getNextWorkItems(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		// 获取未处理
-		agents, err := s.factory.Agent().List(ctx, db.WithRainbowdName(s.name))
-		if err != nil {
-			klog.Error("failed to list my agents %v", err)
-			continue
-		}
-		if len(agents) == 0 {
-			klog.V(1).Infof("未发现 agent，等待下次同步")
-			continue
-		}
-		for _, agent := range agents {
-			s.queue.Add(fmt.Sprintf("%d/%d", agent.Id, agent.ResourceVersion))
-		}
-	}
-}
-
-// TODO
-func (s *rainbowdController) handleErr(ctx context.Context, err error, key interface{}) {
-	if err == nil {
-		return
-	}
-	klog.Error(err)
 }
 
 // 1. 获取 agent 期望状态 (数据库状态)
@@ -188,6 +152,7 @@ func (s *rainbowdController) sync(ctx context.Context, agentId int64, resourceVe
 		return err
 	}
 
+	klog.V(1).Infof("agent(%d/%d) 即将状态同步, 当前状态是 %s", agentId, resourceVersion, old.Status)
 	return s.reconcileAgent(old)
 }
 
@@ -320,6 +285,7 @@ func (s *rainbowdController) runCmd(cmd []string) error {
 func (s *rainbowdController) reconcileAgent(agent *model.Agent) error {
 	runContainer, err := s.getAgentContainer(agent)
 	if err != nil {
+		klog.Errorf("获取 agent 容器失败 %v", err)
 		return err
 	}
 
@@ -521,7 +487,6 @@ func (s *rainbowdController) prepareConfig(agent *model.Agent) error {
 
 	// 追加差异化配置
 	cfg.Agent.Name = agentName
-	cfg.Agent.HealthzPort = agent.HealthzPort
 	cfgData, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err

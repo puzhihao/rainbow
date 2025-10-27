@@ -65,8 +65,6 @@ func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotifi
 		default:
 			// TODO
 		}
-	}
-
 	return nil
 }
 
