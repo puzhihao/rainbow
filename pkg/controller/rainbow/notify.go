@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/caoyingjunz/rainbow/pkg/util"
 	"io"
-	"net/http"
-
 	"k8s.io/klog/v2"
+	"net/http"
+	"time"
 
 	"github.com/caoyingjunz/rainbow/pkg/db"
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
@@ -51,66 +52,72 @@ func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotifi
 		return nil
 	}
 
-	for _, n := range list {
-		switch n.Type {
-		case "wecom":
-			err := s.SendWeComNotify(ctx, &n, req.Content)
-			if err != nil {
-				return err
+	switch req.Role {
+	case 1:
+		return s.SendRegisterNotify(ctx, req)
+	case 0:
+		for _, n := range list {
+			if err := s.sendByType(ctx, &n, req.Content); err != nil {
+				klog.Errorf("failed to send notification via %s (ID: %d): %v", n.Type, n.Id, err)
 			}
-		case "dingding":
-			// TODO
-		case "email":
-			// TODO
-		default:
-			// TODO
 		}
+	}
+
 	return nil
 }
 
-func (s *ServerController) SendWeComNotify(ctx context.Context, req *model.Notification, msg string) error {
+func (s *ServerController) sendByType(ctx context.Context, n *model.Notification, msg string) error {
+	switch n.Type {
+	case "wecom", "dingding", "feishu": // 支持多个类型
+		return s.sendWebhook(ctx, n, msg)
+	case "email":
+		// TODO: 实现邮件推送
+	default:
+		klog.Warningf("unknown notification type: %s (ID: %d)", n.Type, n.Id)
+	}
+	return nil
+}
 
-	type WeComConfig struct {
-		URL   string `json:"url"`
-		Token string `json:"token"`
+// 通用 webhook 推送方法
+func (s *ServerController) sendWebhook(ctx context.Context, n *model.Notification, msg string) error {
+	var cfg struct {
+		URL string `json:"url"`
 	}
 
-	var wecomCfg WeComConfig
-	if err := json.Unmarshal([]byte(req.PushCfg), &wecomCfg); err != nil {
-		klog.Errorf("failed to parse WeCom config (ID: %d): %v", req.Id, err)
+	if err := json.Unmarshal([]byte(n.PushCfg), &cfg); err != nil {
+		return fmt.Errorf("invalid %s config JSON (ID: %d): %w", n.Type, n.Id, err)
+	}
+	if cfg.URL == "" {
+		return fmt.Errorf("empty %s URL (ID: %d)", n.Type, n.Id)
 	}
 
-	if wecomCfg.URL == "" || wecomCfg.Token == "" {
-		klog.Errorf("invalid WeCom config (ID: %d): empty URL or token", req.Id)
-	}
-
-	apiURL := fmt.Sprintf("%s?key=%s", wecomCfg.URL, wecomCfg.Token)
 	payload := map[string]interface{}{
 		"msgtype": "text",
 		"text": map[string]string{
-			"content": msg, // 使用请求中的实际内容
+			"content": msg,
 		},
 	}
 
-	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(marshal(payload)))
+	resp, err := http.Post(cfg.URL, "application/json", bytes.NewBuffer(mustJSON(payload)))
 	if err != nil {
-		klog.Errorf("failed to send to WeCom (ID: %d): %v", req.Id, err)
+		return fmt.Errorf("%s webhook post failed (ID: %d): %w", n.Type, n.Id, err)
 	}
 	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			klog.Warningf("failed to close response body (ID: %d): %v", req.Id, err)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
 		}
 	}()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		klog.Errorf("WeCom API error (ID: %d): %s - %s", req.Id, resp.Status, string(body))
 
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s API error (ID: %d): %s - %s", n.Type, n.Id, resp.Status, string(body))
 	}
-	klog.Infof("successfully sent notification via config (ID: %d)", req.Id)
+
+	klog.Infof("✅ successfully sent %s notification (ID: %d)", n.Type, n.Id)
 	return nil
 }
 
-func marshal(v interface{}) []byte {
+func mustJSON(v interface{}) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
 		klog.Errorf("failed to marshal JSON: %v", err)
@@ -119,22 +126,44 @@ func marshal(v interface{}) []byte {
 	return b
 }
 
-//func (s *ServerController) SendRegisterNotify(ctx context.Context, req *types.SendNotificationRequest) error {
-//	notifies, err := s.factory.Notify().List(ctx, db.WithRole(req.Role), db.WithEnable(1))
-//	if err != nil {
-//		klog.Errorf("获取 notify 失败 %v", err)
-//		return err
-//	}
-//	for _, notify := range notifies {
-//		http := util.NewHttpClient(5*time.Second, notify.Url)
-//		msg := fmt.Sprintf("注册通知\n用户名: %s\n时间: %v\nEmail: %s", req.UserName, time.Now().Format("2006-01-02 15:04:05"), req.Email)
-//		if err = http.Post(notify.Url, nil,
-//			PushMessage{Text: map[string]string{"content": msg}, Msgtype: "text"}, map[string]string{"Content-Type": "application/json"}); err != nil {
-//			klog.Errorf("notify(%s) 推送失败 %v", notify.Name, err)
-//			continue
-//		}
-//		klog.Errorf("notify(%s) 推送成功", notify.Name)
-//	}
-//
-//	return nil
-//}
+func (s *ServerController) SendRegisterNotify(ctx context.Context, req *types.SendNotificationRequest) error {
+	notifies, err := s.factory.Notify().List(ctx, db.WithRole(req.Role), db.WithEnable(1))
+	if err != nil {
+		return fmt.Errorf("failed to query register notify list: %w", err)
+	}
+
+	for _, n := range notifies {
+		var cfg struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal([]byte(n.PushCfg), &cfg); err != nil {
+			klog.Errorf("failed to parse config (ID: %d): %v", n.Id, err)
+			continue
+		}
+		if cfg.URL == "" {
+			klog.Errorf("invalid config (ID: %d): empty URL", n.Id)
+			continue
+		}
+
+		msg := fmt.Sprintf(
+			"注册通知\n用户名: %s\n时间: %s\nEmail: %s",
+			req.UserName, time.Now().Format("2006-01-02 15:04:05"), req.Email,
+		)
+
+		client := util.NewHttpClient(5*time.Second, cfg.URL)
+		err = client.Post(cfg.URL, nil,
+			PushMessage{
+				Text:    map[string]string{"content": msg},
+				Msgtype: "text",
+			},
+			map[string]string{"Content-Type": "application/json"},
+		)
+		if err != nil {
+			klog.Errorf("notify(%s) 推送失败: %v", n.Name, err)
+			continue
+		}
+		klog.Infof("notify(%s) 推送成功", n.Name)
+	}
+
+	return nil
+}
