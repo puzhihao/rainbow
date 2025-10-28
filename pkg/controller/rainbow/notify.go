@@ -22,8 +22,20 @@ type PushMessage struct {
 	Msgtype string            `json:"msgtype"`
 }
 
+func (s *ServerController) preCreateNotify(ctx context.Context, req *types.CreateNotificationRequest) error {
+	return nil
+}
+
 func (s *ServerController) CreateNotify(ctx context.Context, req *types.CreateNotificationRequest) error {
-	_, err := s.factory.Notify().Create(ctx, &model.Notification{
+	if err := s.preCreateNotify(ctx, req); err != nil {
+		return err
+	}
+
+	pushCfg, err := req.PushCfg.Marshal()
+	if err != nil {
+		return err
+	}
+	_, err = s.factory.Notify().Create(ctx, &model.Notification{
 		Name:   req.Name,
 		Role:   req.Role,
 		Enable: req.Enable,
@@ -32,7 +44,7 @@ func (s *ServerController) CreateNotify(ctx context.Context, req *types.CreateNo
 			UserId:   req.UserId,
 			UserName: req.UserName,
 		},
-		PushCfg:   req.PushCfg,
+		PushCfg:   pushCfg,
 		ShortDesc: req.ShortDesc,
 	})
 	if err != nil {
@@ -56,11 +68,11 @@ func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotifi
 	case 1:
 		return s.SendRegisterNotify(ctx, req)
 	case 0:
-		for _, n := range list {
-			if err := s.sendByType(ctx, &n, req.Content); err != nil {
-				klog.Errorf("failed to send notification via %s (ID: %d): %v", n.Type, n.Id, err)
-			}
-		}
+		//for _, n := range list {
+		//	if err := s.sendByType(ctx, &n, req.Content); err != nil {
+		//		klog.Errorf("failed to send notification via %s (ID: %d): %v", n.Type, n.Id, err)
+		//	}
+		//}
 	}
 
 	return nil
@@ -147,7 +159,7 @@ func (s *ServerController) SendRegisterNotify(ctx context.Context, req *types.Se
 
 		msg := fmt.Sprintf(
 			"注册通知\n用户名: %s\n时间: %s\nEmail: %s",
-			req.UserName, time.Now().Format("2006-01-02 15:04:05"), req.Email,
+			req.UserName, time.Now().Format("2006-01-02 15:04:05"), "",
 		)
 
 		client := util.NewHttpClient(5*time.Second, cfg.URL)
@@ -166,4 +178,13 @@ func (s *ServerController) SendRegisterNotify(ctx context.Context, req *types.Se
 	}
 
 	return nil
+}
+
+func (s *ServerController) ListNotifies(ctx context.Context, listOption types.ListOptions) ([]model.Notification, error) {
+	ns, err := s.factory.Notify().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return ns, nil
 }

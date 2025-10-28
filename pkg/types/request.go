@@ -200,18 +200,16 @@ type (
 	CreateNotificationRequest struct {
 		UserMetaRequest `json:",inline"`
 
-		Name      string `json:"name"`
-		Role      int    `json:"role"` // 1 管理员 0 普通用户
-		Enable    bool   `json:"enable"`
-		Type      string `json:"type"` // 支持 webhook, dingtalk, wecom
-		PushCfg   string `json:"push_cfg"`
-		Content   string `json:"content"`
-		ShortDesc string `json:"short_desc"`
+		Name      string      `json:"name"`
+		Role      int         `json:"role"` // 1 管理员 0 普通用户
+		Enable    bool        `json:"enable"`
+		Type      string      `json:"type"` // 支持 webhook, dingtalk, wecom
+		PushCfg   *PushConfig `json:"push_cfg,omitempty"`
+		ShortDesc string      `json:"short_desc"`
 	}
+
 	SendNotificationRequest struct {
 		CreateNotificationRequest `json:",inline"`
-
-		Email string `json:"email"`
 	}
 
 	// PageRequest 分页配置
