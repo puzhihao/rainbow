@@ -55,11 +55,11 @@ func (s *ServerController) CreateNotify(ctx context.Context, req *types.CreateNo
 }
 
 func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotificationRequest) error {
-	list, err := s.factory.Notify().List(ctx, db.WithUser(req.UserId), db.WithEnable(1))
+	notifies, err := s.factory.Notify().List(ctx, db.WithUser(req.UserId), db.WithEnable(1))
 	if err != nil {
-		return fmt.Errorf("failed to query notification configs: %w", err)
+		return err
 	}
-	if len(list) == 0 {
+	if len(notifies) == 0 {
 		klog.Warningf("no enabled notification config found for user %s", req.UserId)
 		return nil
 	}
@@ -159,7 +159,7 @@ func (s *ServerController) SendRegisterNotify(ctx context.Context, req *types.Se
 
 		msg := fmt.Sprintf(
 			"注册通知\n用户名: %s\n时间: %s\nEmail: %s",
-			req.UserName, time.Now().Format("2006-01-02 15:04:05"), "",
+			req.UserName, time.Now().Format("2006-01-02 15:04:05"), req.Email,
 		)
 
 		client := util.NewHttpClient(5*time.Second, cfg.URL)
