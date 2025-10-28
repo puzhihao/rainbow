@@ -388,7 +388,6 @@ func (p *PluginController) doPushImage(img config.Image) error {
 		}
 		p.SyncImageStatus(targetImage, rainbowtypes.SyncImageComplete, "", img)
 		p.CreateTaskMessage(fmt.Sprintf("镜像 %s 同步完成", imageToPush))
-		p.SendNotifyMessage(fmt.Sprintf("镜像 %s 同步完成", imageToPush))
 	}
 
 	return nil
@@ -541,16 +540,5 @@ func (p *PluginController) CreateTaskMessage(msg string) {
 		klog.Errorf("创建 %s 失败 %v", msg, err)
 	} else {
 		klog.Infof("创建 %s 成功", msg)
-	}
-}
-
-func (p *PluginController) SendNotifyMessage(msg string) {
-	if err := p.httpClient.Post(
-		fmt.Sprintf("%s/rainbow/send/notification", p.Callback),
-		nil,
-		map[string]interface{}{"user_id": p.Cfg.Plugin.UserId, "content": msg}, nil); err != nil {
-		klog.Errorf("发送通知 %s 失败 %v", msg, err)
-	} else {
-		klog.Infof("发送通知 %s 成功", msg)
 	}
 }
