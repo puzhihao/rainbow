@@ -210,7 +210,10 @@ type (
 
 	SendNotificationRequest struct {
 		CreateNotificationRequest `json:",inline"`
-		Email                     string `json:"email"`
+
+		Email   string `json:"email"`   // 系统通知，用户注册时使用
+		DryRun  bool   `json:"dry_run"` // 测试连通性
+		Content string `json:"content"` // 用户通知，用于存储镜像内容
 	}
 
 	// PageRequest 分页配置

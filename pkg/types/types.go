@@ -312,17 +312,35 @@ type Platform struct {
 	OSVersion    *string `json:"os.version,omitempty"`
 }
 
+const (
+	UserNotifyRole   = 0
+	SystemNotifyRole = 1
+
+	DingtalkNotifyType = "dingtalk"
+	QiWeiNotifyType    = "wecom"
+	FeiShuNotifyType   = "feishu"
+	EmailNotifyType    = "email"
+	WebhookNotifyType  = "webhook"
+)
+
 type PushConfig struct {
 	Webhook  *WebhookConfig  `json:"webhook,omitempty"`
 	Dingtalk *DingtalkConfig `json:"dingtalk,omitempty"`
+	QiWei    *QiWeiConfig    `json:"qiwei,omitempty"`
 	Email    *EmailConfig    `json:"email,omitempty"`
 }
 
 type WebhookConfig struct {
-	URL string `json:"url"`
+	Method string `json:"method"`
+	URL    string `json:"url"`
+	Header string `json:"header"`
 }
 
 type DingtalkConfig struct {
+	URL string `json:"url"`
+}
+
+type QiWeiConfig struct {
 	URL string `json:"url"`
 }
 

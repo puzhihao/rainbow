@@ -1,20 +1,16 @@
 package rainbow
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"github.com/caoyingjunz/rainbow/pkg/util"
-	"io"
 	"k8s.io/klog/v2"
-	"net/http"
 	"time"
 
 	"github.com/caoyingjunz/rainbow/pkg/db"
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
 	"github.com/caoyingjunz/rainbow/pkg/db/model/rainbow"
 	"github.com/caoyingjunz/rainbow/pkg/types"
+	"github.com/caoyingjunz/rainbow/pkg/util"
 )
 
 type PushMessage struct {
@@ -22,6 +18,7 @@ type PushMessage struct {
 	Msgtype string            `json:"msgtype"`
 }
 
+// TODO: 根据不同的类型，检查对应配置是否缺失
 func (s *ServerController) preCreateNotify(ctx context.Context, req *types.CreateNotificationRequest) error {
 	return nil
 }
@@ -54,137 +51,111 @@ func (s *ServerController) CreateNotify(ctx context.Context, req *types.CreateNo
 	return err
 }
 
+func (s *ServerController) GetNotify(ctx context.Context, notifyId int64) (*model.Notification, error) {
+	return s.factory.Notify().Get(ctx, notifyId)
+}
+
+func (s *ServerController) DeleteNotify(ctx context.Context, notifyId int64) error {
+	return s.factory.Notify().Delete(ctx, notifyId)
+}
+
+func (s *ServerController) makeSendTpl(req *types.SendNotificationRequest) string {
+	// 1. 构造推送内容模板
+	tpl := fmt.Sprintf("%s\n用户名: %s\n时间: %v\nEmail: %s", req.ShortDesc, req.UserName, time.Now().Format("2006-01-02 15:04:05"), req.Email)
+	if req.Role == types.UserNotifyRole {
+		tpl = fmt.Sprintf("PixiuHub 同步通知\n时间: %v\n: %s", time.Now().Format("2006-01-02 15:04:05"), req.Content)
+		if req.DryRun {
+			tpl = fmt.Sprintf("%s\nHello PixiuHub", req.ShortDesc)
+		}
+	}
+	return tpl
+}
+
 func (s *ServerController) SendNotify(ctx context.Context, req *types.SendNotificationRequest) error {
-	notifies, err := s.factory.Notify().List(ctx, db.WithUser(req.UserId), db.WithEnable(1))
+	opts := []db.Options{db.WithRole(req.Role), db.WithEnable(1)}
+	if req.Role == types.UserNotifyRole {
+		opts = append(opts, db.WithUser(req.UserId))
+	}
+	notifies, err := s.factory.Notify().List(ctx, opts...)
 	if err != nil {
+		klog.Errorf("获取 notify 失败 %v", err)
 		return err
 	}
 	if len(notifies) == 0 {
-		klog.Warningf("no enabled notification config found for user %s", req.UserId)
+		klog.Warningf("未发现(%s)已开启的通知通道，忽略本次通知", req.UserId)
 		return nil
 	}
 
-	switch req.Role {
-	case 1:
-		return s.SendRegisterNotify(ctx, req)
-	case 0:
-		//for _, n := range list {
-		//	if err := s.sendByType(ctx, &n, req.Content); err != nil {
-		//		klog.Errorf("failed to send notification via %s (ID: %d): %v", n.Type, n.Id, err)
-		//	}
-		//}
+	for _, notify := range notifies {
+		var pushCfg types.PushConfig
+		if err = pushCfg.Unmarshal(notify.PushCfg); err != nil {
+			return err
+		}
+
+		switch notify.Type {
+		case types.DingtalkNotifyType, types.QiWeiNotifyType: // 企微和钉钉的推送格式相同
+			// 1. 构造请求地址
+			url := pushCfg.Dingtalk.URL
+			if notify.Type == types.QiWeiNotifyType {
+				url = pushCfg.QiWei.URL
+			}
+			// 2. 发送推送请求
+			if err = s.send(ctx, url, PushMessage{Text: map[string]string{"content": s.makeSendTpl(req)}, Msgtype: "text"}); err != nil {
+				klog.Errorf("notify(%s) 推送失败 %v", notify.Name, err)
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported message type %s", notify.Type)
+		}
+
+		klog.Infof("notify(%s) 推送成功", notify.Name)
+	}
+	return nil
+}
+
+func (s *ServerController) send(ctx context.Context, url string, val interface{}) error {
+	http2 := util.NewHttpClient(5*time.Second, url)
+	if err := http2.Post(url, nil, val, map[string]string{"Content-Type": "application/json"}); err != nil {
+		klog.Errorf("发送请求 %s 失败 %v", url, err)
+		return err
 	}
 
 	return nil
 }
 
-func (s *ServerController) sendByType(ctx context.Context, n *model.Notification, msg string) error {
-	switch n.Type {
-	case "wecom", "dingding", "feishu": // 支持多个类型
-		return s.sendWebhook(ctx, n, msg)
-	case "email":
-		// TODO: 实现邮件推送
-	default:
-		klog.Warningf("unknown notification type: %s (ID: %d)", n.Type, n.Id)
-	}
-	return nil
-}
-
-// 通用 webhook 推送方法
-func (s *ServerController) sendWebhook(ctx context.Context, n *model.Notification, msg string) error {
-	var cfg struct {
-		URL string `json:"url"`
-	}
-
-	if err := json.Unmarshal([]byte(n.PushCfg), &cfg); err != nil {
-		return fmt.Errorf("invalid %s config JSON (ID: %d): %w", n.Type, n.Id, err)
-	}
-	if cfg.URL == "" {
-		return fmt.Errorf("empty %s URL (ID: %d)", n.Type, n.Id)
-	}
-
-	payload := map[string]interface{}{
-		"msgtype": "text",
-		"text": map[string]string{
-			"content": msg,
+func (s *ServerController) ListNotifies(ctx context.Context, listOption types.ListOptions) (interface{}, error) {
+	// 设置默认值
+	listOption.SetDefaultPageOption()
+	pageResult := types.PageResult{
+		PageRequest: types.PageRequest{
+			Page:  listOption.Page,
+			Limit: listOption.Limit,
 		},
 	}
 
-	resp, err := http.Post(cfg.URL, "application/json", bytes.NewBuffer(mustJSON(payload)))
+	opts := []db.Options{ // 先写条件，再写排序，再偏移，再设置每页数量
+		db.WithUser(listOption.UserId),
+	}
+	var err error
+	pageResult.Total, err = s.factory.Notify().Count(ctx, opts...)
 	if err != nil {
-		return fmt.Errorf("%s webhook post failed (ID: %d): %w", n.Type, n.Id, err)
-	}
-	defer func() {
-		if resp != nil && resp.Body != nil {
-			_ = resp.Body.Close()
-		}
-	}()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s API error (ID: %d): %s - %s", n.Type, n.Id, resp.Status, string(body))
+		klog.Errorf("获取镜像总数失败 %v", err)
+		pageResult.Message = err.Error()
 	}
 
-	klog.Infof("✅ successfully sent %s notification (ID: %d)", n.Type, n.Id)
-	return nil
-}
+	offset := (listOption.Page - 1) * listOption.Limit
+	opts = append(opts, []db.Options{
+		db.WithModifyOrderByDesc(),
+		db.WithOffset(offset),
+		db.WithLimit(listOption.Limit),
+	}...)
 
-func mustJSON(v interface{}) []byte {
-	b, err := json.Marshal(v)
+	pageResult.Items, err = s.factory.Notify().List(ctx, opts...)
 	if err != nil {
-		klog.Errorf("failed to marshal JSON: %v", err)
-		return []byte("{}")
-	}
-	return b
-}
-
-func (s *ServerController) SendRegisterNotify(ctx context.Context, req *types.SendNotificationRequest) error {
-	notifies, err := s.factory.Notify().List(ctx, db.WithRole(req.Role), db.WithEnable(1))
-	if err != nil {
-		return fmt.Errorf("failed to query register notify list: %w", err)
+		klog.Errorf("获取镜像列表失败 %v", err)
+		pageResult.Message = err.Error()
+		return pageResult, err
 	}
 
-	for _, n := range notifies {
-		var cfg struct {
-			URL string `json:"url"`
-		}
-		if err := json.Unmarshal([]byte(n.PushCfg), &cfg); err != nil {
-			klog.Errorf("failed to parse config (ID: %d): %v", n.Id, err)
-			continue
-		}
-		if cfg.URL == "" {
-			klog.Errorf("invalid config (ID: %d): empty URL", n.Id)
-			continue
-		}
-
-		msg := fmt.Sprintf(
-			"注册通知\n用户名: %s\n时间: %s\nEmail: %s",
-			req.UserName, time.Now().Format("2006-01-02 15:04:05"), req.Email,
-		)
-
-		client := util.NewHttpClient(5*time.Second, cfg.URL)
-		err = client.Post(cfg.URL, nil,
-			PushMessage{
-				Text:    map[string]string{"content": msg},
-				Msgtype: "text",
-			},
-			map[string]string{"Content-Type": "application/json"},
-		)
-		if err != nil {
-			klog.Errorf("notify(%s) 推送失败: %v", n.Name, err)
-			continue
-		}
-		klog.Infof("notify(%s) 推送成功", n.Name)
-	}
-
-	return nil
-}
-
-func (s *ServerController) ListNotifies(ctx context.Context, listOption types.ListOptions) ([]model.Notification, error) {
-	ns, err := s.factory.Notify().List(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	return ns, nil
+	return pageResult, nil
 }

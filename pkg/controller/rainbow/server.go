@@ -131,8 +131,10 @@ type ServerInterface interface {
 	DeleteUser(ctx context.Context, userId string) error
 
 	CreateNotify(ctx context.Context, req *types.CreateNotificationRequest) error
+	GetNotify(ctx context.Context, notifyId int64) (*model.Notification, error)
+	DeleteNotify(ctx context.Context, notifyId int64) error
+	ListNotifies(ctx context.Context, listOption types.ListOptions) (interface{}, error)
 	SendNotify(ctx context.Context, req *types.SendNotificationRequest) error
-	ListNotifies(ctx context.Context, listOption types.ListOptions) ([]model.Notification, error)
 
 	ListKubernetesVersions(ctx context.Context, listOption types.ListOptions) (interface{}, error)
 	SyncKubernetesVersions(ctx context.Context, req *types.KubernetesTagRequest) (interface{}, error)

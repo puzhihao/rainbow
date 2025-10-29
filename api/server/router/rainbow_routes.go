@@ -1471,10 +1471,9 @@ func (cr *rainbowRouter) getUser(c *gin.Context) {
 		httputils.SetFailed(c, resp, err)
 		return
 	}
-
 	httputils.SetSuccess(c, resp)
-
 }
+
 func (cr *rainbowRouter) listUsers(c *gin.Context) {
 	resp := httputils.NewResponse()
 
@@ -1521,12 +1520,36 @@ func (cr *rainbowRouter) updateNotification(c *gin.Context) {
 
 func (cr *rainbowRouter) deleteNotification(c *gin.Context) {
 	resp := httputils.NewResponse()
+	var (
+		idMeta types.IdMeta
+		err    error
+	)
+	if err = httputils.ShouldBindAny(c, nil, &idMeta, nil); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+	if err = cr.c.Server().DeleteNotify(c, idMeta.ID); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
 
 	httputils.SetSuccess(c, resp)
 }
 
 func (cr *rainbowRouter) getNotification(c *gin.Context) {
 	resp := httputils.NewResponse()
+	var (
+		idMeta types.IdMeta
+		err    error
+	)
+	if err = httputils.ShouldBindAny(c, nil, &idMeta, nil); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+	if resp.Result, err = cr.c.Server().GetNotify(c, idMeta.ID); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
 
 	httputils.SetSuccess(c, resp)
 }
