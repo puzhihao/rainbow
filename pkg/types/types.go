@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
@@ -309,4 +310,51 @@ type Platform struct {
 	OS           string  `json:"os"`
 	Variant      *string `json:"variant,omitempty"` // 使用指针处理可选字段
 	OSVersion    *string `json:"os.version,omitempty"`
+}
+
+const (
+	UserNotifyRole   = 0
+	SystemNotifyRole = 1
+
+	DingtalkNotifyType = "dingtalk"
+	QiWeiNotifyType    = "wecom"
+	FeiShuNotifyType   = "feishu"
+	EmailNotifyType    = "email"
+	WebhookNotifyType  = "webhook"
+)
+
+type PushConfig struct {
+	Webhook  *WebhookConfig  `json:"webhook,omitempty"`
+	Dingtalk *DingtalkConfig `json:"dingtalk,omitempty"`
+	QiWei    *QiWeiConfig    `json:"qiwei,omitempty"`
+	Email    *EmailConfig    `json:"email,omitempty"`
+}
+
+type WebhookConfig struct {
+	Method string `json:"method"`
+	URL    string `json:"url"`
+	Header string `json:"header"`
+}
+
+type DingtalkConfig struct {
+	URL string `json:"url"`
+}
+
+type QiWeiConfig struct {
+	URL string `json:"url"`
+}
+
+type EmailConfig struct {
+}
+
+func (pc *PushConfig) Marshal() (string, error) {
+	d, err := json.Marshal(pc)
+	if err != nil {
+		return "", err
+	}
+	return string(d), nil
+}
+
+func (pc *PushConfig) Unmarshal(s string) error {
+	return json.Unmarshal([]byte(s), &pc)
 }

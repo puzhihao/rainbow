@@ -17,6 +17,7 @@ type NotifyInterface interface {
 	Delete(ctx context.Context, id int64) error
 	Get(ctx context.Context, id int64) (*model.Notification, error)
 	List(ctx context.Context, opts ...Options) ([]model.Notification, error)
+	Count(ctx context.Context, opts ...Options) (int64, error)
 }
 
 type notify struct {
@@ -81,4 +82,18 @@ func (d *notify) List(ctx context.Context, opts ...Options) ([]model.Notificatio
 		return nil, err
 	}
 	return audits, nil
+}
+
+func (d *notify) Count(ctx context.Context, opts ...Options) (int64, error) {
+	tx := d.db.WithContext(ctx)
+	for _, opt := range opts {
+		tx = opt(tx)
+	}
+
+	var total int64
+	if err := tx.Model(&model.Notification{}).Count(&total).Error; err != nil {
+		return 0, err
+	}
+
+	return total, nil
 }
