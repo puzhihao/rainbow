@@ -208,6 +208,15 @@ type (
 		ShortDesc string      `json:"short_desc"`
 	}
 
+	NotificationResult struct {
+		Id              int64     `json:"id"`
+		GmtCreate       time.Time `json:"gmt_create"`
+		GmtModified     time.Time `json:"gmt_modified"`
+		ResourceVersion int64     `json:"resource_version"`
+
+		CreateNotificationRequest `json:",inline"`
+	}
+
 	SendNotificationRequest struct {
 		CreateNotificationRequest `json:",inline"`
 
