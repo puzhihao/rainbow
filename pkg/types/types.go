@@ -317,7 +317,7 @@ const (
 	SystemNotifyRole = 1
 
 	DingtalkNotifyType = "dingtalk"
-	QiWeiNotifyType    = "wecom"
+	QiWeiNotifyType    = "qiwei"
 	FeiShuNotifyType   = "feishu"
 	EmailNotifyType    = "email"
 	WebhookNotifyType  = "webhook"
