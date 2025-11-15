@@ -502,9 +502,39 @@ func (s *ServerController) sendToUser(ctx context.Context, req *types.UpdateTask
 	})
 }
 
+func removeTaskID(taskIds string, taskIDToRemove string) string {
+	ids := strings.Split(taskIds, ",")
+	result := make([]string, 0, len(ids))
+
+	for _, id := range ids {
+		if id != taskIDToRemove {
+			result = append(result, id)
+		}
+	}
+
+	return strings.Join(result, ",")
+}
+
 func (s *ServerController) DeleteTask(ctx context.Context, taskId int64) error {
-	// TODO: 从 tags 里移除任务id
-	return s.factory.Task().Delete(ctx, taskId)
+	if err := s.factory.Task().Delete(ctx, taskId); err != nil {
+		klog.Errorf("删除任务失败 %v", taskId)
+		return err
+	}
+
+	tags, err := s.factory.Image().ListTags(ctx, db.WithTaskLike(taskId))
+	if err != nil {
+		klog.Errorf("获取本次任务的镜像tag失败 %v", err)
+		return err
+	}
+	for _, tag := range tags {
+		if err = s.factory.Image().UpdateTag(ctx, tag.ImageId, tag.Name, map[string]interface{}{
+			"task_ids": removeTaskID(tag.TaskIds, fmt.Sprintf("%d", taskId)),
+		}); err != nil {
+			klog.Warningf("移除任务(%s)关联的tag(%s)时失败 %v", taskId, tag.Name, err)
+		}
+	}
+
+	return nil
 }
 
 func (s *ServerController) DeleteTaskWithImages(ctx context.Context, taskId int64) error {
@@ -558,7 +588,14 @@ func (s *ServerController) ListTasksByIds(ctx context.Context, ids []int64) (int
 }
 
 func (s *ServerController) DeleteTasksByIds(ctx context.Context, ids []int64) error {
-	return s.factory.Task().DeleteInBatch(ctx, ids)
+	for _, taskId := range ids {
+		if err := s.DeleteTask(ctx, taskId); err != nil {
+			klog.Errorf("%v", err)
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *ServerController) preCreateSubscribe(ctx context.Context, req *types.CreateSubscribeRequest) error {
