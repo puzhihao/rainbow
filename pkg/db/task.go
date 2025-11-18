@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
 	"github.com/caoyingjunz/rainbow/pkg/util/errors"
@@ -47,6 +48,8 @@ type TaskInterface interface {
 	GetUser(ctx context.Context, userId string) (*model.User, error)
 	DeleteUser(ctx context.Context, userId string) error
 	UpdateUser(ctx context.Context, userId string, resourceVersion int64, updates map[string]interface{}) error
+
+	CreateOrUpdateUser(ctx context.Context, object *model.User) error
 
 	ListKubernetesVersions(ctx context.Context, opts ...Options) ([]model.KubernetesVersion, error)
 	GetKubernetesVersionCount(ctx context.Context, opts ...Options) (int64, error)
@@ -342,6 +345,15 @@ func (a *task) CreateUser(ctx context.Context, object *model.User) error {
 
 	err := a.db.WithContext(ctx).Create(object).Error
 	return err
+}
+
+func (a *task) CreateOrUpdateUser(ctx context.Context, object *model.User) error {
+	tx := a.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"gmt_modified", "name", "user_type", "expire_time"}),
+	}).Create(&object)
+
+	return tx.Error
 }
 
 func (a *task) UpdateUser(ctx context.Context, userId string, resourceVersion int64, updates map[string]interface{}) error {

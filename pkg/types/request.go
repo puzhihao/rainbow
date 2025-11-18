@@ -177,6 +177,10 @@ type (
 		CreateUserRequest `json:",inline"`
 	}
 
+	CreateUsersRequest struct {
+		Users []CreateUserRequest
+	}
+
 	CreateAgentRequest struct {
 		AgentName        string `json:"agent_name"`
 		Type             string `json:"type"`
