@@ -3,6 +3,7 @@ package rainbow
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -77,15 +78,19 @@ func (s *ServerController) EnableChartRepo(ctx context.Context, req *types.Enabl
 
 func (s *ServerController) ListCharts(ctx context.Context, listOption types.ListOptions) (interface{}, error) {
 	repoCfg := s.cfg.Server.Harbor
-	url := fmt.Sprintf("%s/api/%s/%s/charts", repoCfg.URL, repoCfg.Namespace, listOption.Project)
-
-	httpClient := util.NewHttpClient(5*time.Second, url)
-	httpClient.WithAuth(repoCfg.Username, repoCfg.Password)
 
 	var cs []types.ChartInfo
-	if err := httpClient.Get(url, &cs); err != nil {
+	httpClient := util.HttpClientV2{
+		URL: fmt.Sprintf("%s/api/%s/%s/charts", repoCfg.URL, repoCfg.Namespace, listOption.Project),
+	}
+	err := httpClient.Method("GET").
+		WithTimeout(5*time.Second).
+		WithAuth(repoCfg.Username, repoCfg.Password).
+		Do(&cs)
+	if err != nil {
 		return nil, err
 	}
+
 	return cs, nil
 }
 
@@ -195,6 +200,14 @@ func (s *ServerController) uploadChart(project string, filePath string) error {
 	repoCfg := s.cfg.Server.Harbor
 	url := fmt.Sprintf("%s/api/%s/%s/charts", repoCfg.URL, repoCfg.Namespace, project)
 
+	httpClient := util.NewHttpClient(5*time.Second, url)
+	httpClient.WithAuth(repoCfg.Username, repoCfg.Password)
+	httpClient.WithHeaders(map[string]string{
+		"Accept":       "application/json",
+		"Content-Type": writer.FormDataContentType(),
+		"User-Agent":   "Go-Harbor-Client/1.0",
+	})
+
 	req, err := http.NewRequest("POST", url, body)
 	if err != nil {
 		return fmt.Errorf("创建请求失败: %w", err)
@@ -217,5 +230,12 @@ func (s *ServerController) uploadChart(project string, filePath string) error {
 		return fmt.Errorf("读取响应失败: %w", err)
 	}
 
-	return nil
+	var cs types.ChartSaved
+	if err = json.Unmarshal(b, &cs); err != nil {
+		return err
+	}
+	if cs.Saved {
+		return nil
+	}
+	return fmt.Errorf("chart not saved")
 }
