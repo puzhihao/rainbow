@@ -229,6 +229,30 @@ func NewServer(f db.ShareDaoFactory, cfg rainbowconfig.Config, redisClient *redi
 	return sc
 }
 
+func (s *ServerController) RegisterRainbowd(ctx context.Context) error {
+	if len(s.cfg.Rainbowd.Nodes) == 0 {
+		return fmt.Errorf("rainbowd not found")
+	}
+
+	for _, node := range s.cfg.Rainbowd.Nodes {
+		var err error
+		_, err = s.factory.Rainbowd().GetByName(ctx, node.Name)
+		if err == nil {
+			return nil
+		}
+		_, err = s.factory.Rainbowd().Create(ctx, &model.Rainbowd{
+			Name:   node.Name,
+			Host:   node.Host,
+			Status: model.RunAgentType,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (s *ServerController) Run(ctx context.Context, workers int) error {
 	go s.schedule(ctx)
 	go s.sync(ctx)
@@ -241,12 +265,67 @@ func (s *ServerController) Run(ctx context.Context, workers int) error {
 	if err := s.Producer.Start(); err != nil {
 		return err
 	}
+	// 初始化 agent 属性
+	klog.Infof("starting register rainbowd")
+	if err := s.RegisterRainbowd(ctx); err != nil {
+		return err
+	}
+	// 启动 rainbow 检查进程
+	go s.startRainbowdHeartbeat(ctx)
 
 	return nil
 }
 
+func (s *ServerController) startRainbowdHeartbeat(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		klog.V(1).Infof("即将进行 rainbowd 的状态检查")
+		for nodeName, sshConfig := range s.sshConfigMap {
+			old, err := s.factory.Rainbowd().GetByName(ctx, nodeName)
+			if err != nil {
+				klog.Errorf("获取 rainbowd %s 失败 %v ", nodeName, err)
+				klog.Errorf("等待 %s 下一次检查", nodeName)
+				continue
+			}
+
+			status := model.RunAgentType
+			if !s.IsRainbowReachable(&sshConfig, nodeName) {
+				status = model.UnRunAgentType
+			}
+
+			updates := map[string]interface{}{"last_transition_time": time.Now()}
+			if old.Status != status {
+				updates["status"] = status
+				klog.Infof("rainbowd 的状态发生改变，即将同步")
+			} else {
+				klog.V(1).Infof("rainbowd(%s)的状态未发生变化，等待下一次更新", nodeName)
+			}
+			if err = s.factory.Rainbowd().Update(ctx, old.Id, updates); err != nil {
+				klog.Errorf("同步 rainbowd(%s) 状态失败 %v 等待下一次同步", nodeName, err)
+			}
+		}
+	}
+}
+
+func (s *ServerController) IsRainbowReachable(sshConfig *sshutil.SSHConfig, nodeName string) bool {
+	sshClient, err := sshutil.NewSSHClient(sshConfig)
+	if err != nil {
+		klog.Errorf("创建(%s) ssh client 失败 %v", nodeName, err)
+		return false
+	}
+	defer sshClient.Close()
+
+	if err = sshClient.Ping(); err != nil {
+		klog.Infof("检查节点 %s 连通性失败 %v", nodeName, err)
+		return false
+	}
+	return true
+}
+
 func (s *ServerController) Stop(ctx context.Context) {
-	klog.Infof("停止服务!!!")
+	klog.Infof("rocketmq producer 停止服务!!!")
 	_ = s.Producer.Shutdown()
 }
 
