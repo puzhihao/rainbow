@@ -20,17 +20,20 @@ type (
 	}
 
 	CreateBuildRequest struct {
+		UserId     string `json:"user_id"`
 		Name       string `json:"name"`
 		Arch       string `json:"arch"`        // 架构
 		Dockerfile string `json:"dockerfile"`  // 镜像构建 dockerfile
 		RegistryId int64  `json:"registry_id"` // 推送镜像仓库
 		AgentName  string `json:"agent_name"`  // 执行代理
 		Namespace  string `json:"namespace"`
+		Repo       string `json:"repo"` // 构建完成后的镜像名称
 	}
 
 	UpdateBuildRequest struct {
-		Id              int64 `json:"id"`
-		ResourceVersion int64 `json:"resource_version"`
+		Id              int64  `json:"id"`
+		Status          string `json:"status"`
+		ResourceVersion int64  `json:"resource_version"`
 
 		CreateBuildRequest `json:",inline"`
 	}

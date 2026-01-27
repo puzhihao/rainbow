@@ -19,6 +19,7 @@ type Build struct {
 	RegistryId int64  `json:"registry_id"` // 推送镜像仓库
 	AgentName  string `json:"agent_name"`  // 执行代理
 	Namespace  string `json:"namespace"`   // 命名空间
+	Repo       string `json:"repo"`
 }
 
 func (b *Build) TableName() string {

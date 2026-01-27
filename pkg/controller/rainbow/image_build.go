@@ -2,6 +2,7 @@ package rainbow
 
 import (
 	"context"
+	"github.com/caoyingjunz/rainbow/pkg/db/model/rainbow"
 
 	"k8s.io/klog/v2"
 
@@ -10,9 +11,22 @@ import (
 	"github.com/caoyingjunz/rainbow/pkg/types"
 )
 
+const (
+	BuildWaitStatus = "调度中"
+)
+
 func (s *ServerController) CreateBuild(ctx context.Context, req *types.CreateBuildRequest) error {
 	_, err := s.factory.Build().Create(ctx, &model.Build{
-		Name: req.Name,
+		Name:       req.Name,
+		Arch:       req.Arch,
+		Dockerfile: req.Dockerfile,
+		RegistryId: req.RegistryId,
+		Status:     BuildWaitStatus,
+		Namespace:  req.Namespace,
+		UserModel: rainbow.UserModel{
+			UserId: req.UserId,
+		},
+		Repo: req.Repo,
 	})
 	if err != nil {
 		klog.Errorf("创建镜像失败 %v", err)
@@ -33,6 +47,10 @@ func (s *ServerController) DeleteBuild(ctx context.Context, buildId int64) error
 
 func (s *ServerController) UpdateBuild(ctx context.Context, req *types.UpdateBuildRequest) error {
 	updates := make(map[string]interface{})
+	updates["dockerfile"] = req.Dockerfile
+	updates["repo"] = req.Repo
+	updates["status"] = req.Status
+
 	return s.factory.Build().Update(ctx, req.Id, req.ResourceVersion, updates)
 }
 
