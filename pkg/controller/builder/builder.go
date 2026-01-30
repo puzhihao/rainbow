@@ -2,14 +2,12 @@ package builder
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"github.com/caoyingjunz/pixiulib/exec"
 	"github.com/caoyingjunz/rainbow/cmd/app/config"
 	"github.com/caoyingjunz/rainbow/pkg/util"
 	"github.com/docker/docker/client"
 	"k8s.io/klog/v2"
-	"os"
 	"time"
 )
 
@@ -49,7 +47,6 @@ func NewBuilderController(cfg config.Config) *BuilderController {
 		BuilderId:  cfg.Builder.BuilderId,
 		RegistryId: cfg.Builder.RegistryId,
 		Repo:       cfg.Builder.Repo,
-		DockerFile: cfg.Builder.Dockerfile,
 		httpClient: util.NewHttpClient(5*time.Second, cfg.Plugin.Callback),
 	}
 }
@@ -88,24 +85,17 @@ func (b *BuilderController) BuildAndPushImage() error {
 		b.Repo,
 	)
 
-	dockerfileBytes, err := base64.StdEncoding.DecodeString(b.DockerFile)
-	if err != nil {
-		return fmt.Errorf("decode dockerfile failed: %w", err)
-	}
-
-	err = os.WriteFile("Dockerfile", dockerfileBytes, 0644)
-	if err != nil {
-		return fmt.Errorf("write Dockerfile failed: %w", err)
-	}
-
+	b.SyncBuildStatus("开始构建镜像")
 	klog.Infof("Starting build image %s", imageName)
 	buildCmd := []string{"docker", "build", "-t", imageName, "."}
 
 	out, err := b.exec.Command(buildCmd[0], buildCmd[1:]...).CombinedOutput()
 	if err != nil {
+		b.SyncBuildStatus("镜像构建失败")
 		return fmt.Errorf("failed to build image: %w\n%s", err, string(out))
-	}
 
+	}
+	b.SyncBuildStatus("镜像构建成功")
 	klog.Infof("Image built successfully: %s", imageName)
 
 	klog.Infof("Starting push image %s", imageName)
@@ -113,9 +103,10 @@ func (b *BuilderController) BuildAndPushImage() error {
 
 	out, err = b.exec.Command(pushCmd[0], pushCmd[1:]...).CombinedOutput()
 	if err != nil {
+		b.SyncBuildStatus("镜像同步失败")
 		return fmt.Errorf("failed to push image: %w\n%s", err, string(out))
 	}
-
+	b.SyncBuildStatus("镜像同步成功")
 	klog.Infof("Image pushed successfully: %s", imageName)
 	return nil
 }
@@ -125,7 +116,7 @@ func (b *BuilderController) Validate() error {
 		klog.Errorf("%v", err)
 		return err
 	}
-	klog.Infof("plugin validate completed")
+	klog.Infof("builder validate completed")
 	return nil
 }
 
@@ -140,4 +131,14 @@ func (b *BuilderController) Run() error {
 	}
 
 	return nil
+}
+
+func (b *BuilderController) SyncBuildStatus(msg string) {
+	url := fmt.Sprintf("%s/rainbow/builds/%d/status", b.Callback, b.BuilderId)
+	err := b.httpClient.Post(url, nil, map[string]interface{}{"Status": msg}, nil)
+	if err != nil {
+		klog.Errorf("同步 %s 失败 %v", msg, err)
+	} else {
+		klog.Infof("同步 %s 成功", msg)
+	}
 }

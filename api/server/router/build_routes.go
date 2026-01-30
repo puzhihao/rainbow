@@ -70,6 +70,27 @@ func (cr *rainbowRouter) updateBuild(c *gin.Context) {
 	httputils.SetSuccess(c, resp)
 }
 
+func (cr *rainbowRouter) updateBuildStatus(c *gin.Context) {
+	resp := httputils.NewResponse()
+
+	var (
+		idMeta types.IdMeta
+		req    types.UpdateBuildStatusRequest
+		err    error
+	)
+	if err = httputils.ShouldBindAny(c, &req, &idMeta, nil); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+	req.BuildId = idMeta.ID
+	if err = cr.c.Server().UpdateBuildStatus(c, &req); err != nil {
+		httputils.SetFailed(c, resp, err)
+		return
+	}
+
+	httputils.SetSuccess(c, resp)
+}
+
 func (cr *rainbowRouter) listBuilds(c *gin.Context) {
 	resp := httputils.NewResponse()
 

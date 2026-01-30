@@ -134,7 +134,6 @@ type BuilderOption struct {
 	RegistryId int64  `yaml:"registry_id"`
 	Arch       string `yaml:"arch"`
 	Repo       string `yaml:"repo"`
-	Dockerfile string `yaml:"dockerfile"`
 }
 
 type Registry struct {
