@@ -17,6 +17,7 @@ type BuilderController struct {
 	BuilderId  int64
 	DockerFile string
 	Repo       string
+	Arch       string
 
 	httpClient util.HttpInterface
 	exec       exec.Interface
@@ -47,6 +48,7 @@ func NewBuilderController(cfg config.Config) *BuilderController {
 		BuilderId:  cfg.Builder.BuilderId,
 		RegistryId: cfg.Builder.RegistryId,
 		Repo:       cfg.Builder.Repo,
+		Arch:       cfg.Builder.Arch,
 		httpClient: util.NewHttpClient(5*time.Second, cfg.Plugin.Callback),
 	}
 }
@@ -84,30 +86,28 @@ func (b *BuilderController) BuildAndPushImage() error {
 		b.Registry.Namespace,
 		b.Repo,
 	)
-
-	b.SyncBuildStatus("开始构建镜像")
-	klog.Infof("Starting build image %s", imageName)
-	buildCmd := []string{"docker", "build", "-t", imageName, "."}
-
-	out, err := b.exec.Command(buildCmd[0], buildCmd[1:]...).CombinedOutput()
+	b.SyncBuildStatus("初始化构建环境")
+	klog.Info("Init build env")
+	buildInitCmd := []string{"docker", "buildx", "create", "--name", "multi-builder", "--driver", "docker-container", "--use"}
+	out, err := b.exec.Command(buildInitCmd[0], buildInitCmd[1:]...).CombinedOutput()
 	if err != nil {
-		b.SyncBuildStatus("镜像构建失败")
+		b.SyncBuildStatus("初始化构建失败")
 		return fmt.Errorf("failed to build image: %w\n%s", err, string(out))
 
 	}
-	b.SyncBuildStatus("镜像构建成功")
+	b.SyncBuildStatus("开始构建上传镜像")
+	klog.Infof("Starting build image %s", imageName)
+	buildAndPushCmd := []string{"docker", "buildx", "build", "--platform", b.Arch, "-t", imageName, "--push", "."}
+
+	out, err = b.exec.Command(buildAndPushCmd[0], buildAndPushCmd[1:]...).CombinedOutput()
+	if err != nil {
+		b.SyncBuildStatus("镜像构建上传失败")
+		return fmt.Errorf("failed to build image: %w\n%s", err, string(out))
+	}
+	fmt.Println(string(out))
+	b.SyncBuildStatus("镜像构建上传成功")
 	klog.Infof("Image built successfully: %s", imageName)
 
-	klog.Infof("Starting push image %s", imageName)
-	pushCmd := []string{"docker", "push", imageName}
-
-	out, err = b.exec.Command(pushCmd[0], pushCmd[1:]...).CombinedOutput()
-	if err != nil {
-		b.SyncBuildStatus("镜像同步失败")
-		return fmt.Errorf("failed to push image: %w\n%s", err, string(out))
-	}
-	b.SyncBuildStatus("镜像同步成功")
-	klog.Infof("Image pushed successfully: %s", imageName)
 	return nil
 }
 
