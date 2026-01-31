@@ -6,10 +6,10 @@ default:
 
 server:
   harbor:
-    url: registry.cn-shanghai.aliyuncs.com
-    namespace: puzhihao
-    username: 其实我爱你i28_tf9mof
-    password: Lxj905655*
+    url: https://registry.pixiuio.com
+    namespace: chartrepo
+    username: admin
+    password: Harbor12345
   auth:
     access_key: access_key
     secret_key: secret_key
@@ -31,7 +31,7 @@ agent:
 
 rocketmq:
   name_servers:
-    - 192.168.100.250:9876
+    - 127.0.0.1:8080
   group_name: test
   topic: test
   credential:
@@ -43,14 +43,6 @@ plugin:
   task_id: 20220801
   synced: true
   driver: docker #skopeo or docker
-
-builder:
-  callback: http://127.0.0.1:8090
-  builder_id: 20220802
-  registry_id: 20220801
-  arch: linux/amd6 #linux/amd64,linux/arm64,linux/arm/v7
-  repo: nginx:v1
-  dockerfile: "RlJPTSByZWdpc3RyeS5jbi1zaGFuZ2hhaS5hbGl5dW5jcy5jb20vcHV6aGloYW8vY29uc3VsLWs4cy1jb250cm9sLXBsYW5lOjEuOS4y"
 
 rate_limit:
   user_rate_limit:
@@ -68,9 +60,9 @@ rate_limit:
     max_requests: 100
 
 mysql:
-  host: 192.168.100.250
+  host: peng
   user: root
-  password: rootpassword
+  password: Pixiu868686
   port: 3306
   name: rainbow
 
@@ -81,10 +73,10 @@ redis:
   db: 0
 
 registry:
-  repository: registry.cn-shanghai.aliyuncs.com
-  namespace: puzhihao
-  username: 其实我爱你i28_tf9mof
-  password: Lxj905655*
+  repository: harbor.cloud.pixiuio.com
+  namespace: pixiucloud
+  username: test
+  password: test
 
 kubernetes:
   version: v1.23.6
