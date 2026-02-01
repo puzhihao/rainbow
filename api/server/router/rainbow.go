@@ -33,7 +33,7 @@ func (cr *rainbowRouter) initRoutes(httpEngine *gin.Engine) {
 		taskRoute.GET("/:Id", cr.getTask)
 		taskRoute.GET("", cr.listTasks)
 
-		taskRoute.PUT("/:Id/status", cr.UpdateTaskStatus)
+		taskRoute.PUT("/:Id/status", cr.UpdateTaskStatus) // DEPRECATED
 		taskRoute.GET(":Id/images", cr.listTaskImages)
 		taskRoute.POST("/rerun", cr.reRunTask)
 
@@ -228,12 +228,15 @@ func (cr *rainbowRouter) initRoutes(httpEngine *gin.Engine) {
 		buildRoute.PUT("/:Id", cr.updateBuild)
 		buildRoute.GET("", cr.listBuilds)
 		buildRoute.GET("/:Id", cr.getBuild)
-		buildRoute.POST("/:Id/status", cr.setBuildStatus)
+
+		buildRoute.POST("/:Id/messages", cr.createBuildMessage)
+		buildRoute.GET("/:Id/messages", cr.listBuildMessages)
 	}
 
 	// 设置资源状态API
 	setStatus := httpEngine.Group("/rainbow/set")
 	{
 		setStatus.PUT("/build/:Id/status", cr.setBuildStatus)
+		setStatus.PUT("/task/:Id/status", cr.UpdateTaskStatus)
 	}
 }
