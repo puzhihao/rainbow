@@ -4,19 +4,21 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"time"
+
 	"github.com/caoyingjunz/pixiulib/exec"
+	"github.com/docker/docker/client"
+	"k8s.io/klog/v2"
+
 	"github.com/caoyingjunz/rainbow/cmd/app/config"
 	"github.com/caoyingjunz/rainbow/pkg/util"
-	"github.com/docker/docker/client"
-	"io"
-	"k8s.io/klog/v2"
-	"time"
 )
 
-type BuilderController struct {
+type BuildController struct {
 	Callback   string
-	RegistryId int64
-	BuilderId  int64
+	BuildId    int64
 	DockerFile string
 	Repo       string
 	Arch       string
@@ -27,10 +29,9 @@ type BuilderController struct {
 
 	Cfg      config.Config
 	Registry config.Registry
-	Images   config.Image
 }
 
-func (b *BuilderController) Login() error {
+func (b *BuildController) Login() error {
 	cmd := []string{"docker", "login", "-u", b.Registry.Username, "-p", b.Registry.Password}
 	if b.Registry.Repository != "" {
 		cmd = append(cmd, b.Registry.Repository)
@@ -43,33 +44,18 @@ func (b *BuilderController) Login() error {
 	return nil
 }
 
-func NewBuilderController(cfg config.Config) *BuilderController {
-	return &BuilderController{
+func NewBuilderController(cfg config.Config) *BuildController {
+	return &BuildController{
 		Cfg:        cfg,
-		Callback:   cfg.Builder.Callback,
-		BuilderId:  cfg.Builder.BuilderId,
-		RegistryId: cfg.Builder.RegistryId,
-		Repo:       cfg.Builder.Repo,
-		Arch:       cfg.Builder.Arch,
-		httpClient: util.NewHttpClient(5*time.Second, cfg.Plugin.Callback),
+		Callback:   cfg.Build.Callback,
+		BuildId:    cfg.Build.BuildId,
+		Repo:       cfg.Build.Repo,
+		Arch:       cfg.Build.Arch,
+		httpClient: util.NewHttpClient(5*time.Second, cfg.Build.Callback),
 	}
 }
 
-func (b *BuilderController) Complete() error {
-	var err error
-	if err = b.doComplete(); err != nil {
-		klog.Info(err)
-	}
-	return nil
-}
-
-func (b *BuilderController) Close() {
-	if b.docker != nil {
-		_ = b.docker.Close()
-	}
-}
-
-func (b *BuilderController) doComplete() error {
+func (b *BuildController) Complete() error {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return err
@@ -81,24 +67,19 @@ func (b *BuilderController) doComplete() error {
 	return b.Validate()
 }
 
-func (b *BuilderController) BuildAndPushImage() error {
-	imageName := fmt.Sprintf(
-		"%s/%s/%s",
-		b.Registry.Repository,
-		b.Registry.Namespace,
-		b.Repo,
-	)
+func (b *BuildController) Close() {
+	if b.docker != nil {
+		_ = b.docker.Close()
+	}
+}
+
+func (b *BuildController) BuildAndPushImage() error {
+	imageName := fmt.Sprintf("%s/%s/%s", b.Registry.Repository, b.Registry.Namespace, b.Repo)
 
 	b.SyncBuildStatus("初始化构建环境")
 	klog.Info("Init build env")
 
-	buildInitCmd := []string{
-		"docker", "buildx", "create",
-		"--name", "multi-builder",
-		"--driver", "docker-container",
-		"--use",
-	}
-
+	buildInitCmd := []string{"docker", "buildx", "create", "--name", "multi-builder", "--driver", "docker-container", "--use"}
 	out, err := b.exec.Command(buildInitCmd[0], buildInitCmd[1:]...).CombinedOutput()
 	b.SyncBuildMessages(string(out))
 	if err != nil {
@@ -109,13 +90,7 @@ func (b *BuilderController) BuildAndPushImage() error {
 	b.SyncBuildStatus("开始构建上传镜像")
 	klog.Infof("Starting build image %s", imageName)
 
-	buildAndPushCmd := b.exec.Command(
-		"docker", "buildx", "build",
-		"--platform", b.Arch,
-		"-t", imageName,
-		"--push", ".",
-	)
-
+	buildAndPushCmd := b.exec.Command("docker", "buildx", "build", "--platform", b.Arch, "-t", imageName, "--push", ".")
 	if err := b.runCmdAndStream(buildAndPushCmd); err != nil {
 		b.SyncBuildStatus("镜像构建上传失败")
 		return fmt.Errorf("failed to build and push image: %w", err)
@@ -127,40 +102,46 @@ func (b *BuilderController) BuildAndPushImage() error {
 	return nil
 }
 
-func (b *BuilderController) Validate() error {
+func (b *BuildController) Validate() error {
 	if _, err := b.docker.Ping(context.Background()); err != nil {
-		klog.Errorf("%v", err)
 		return err
 	}
 	klog.Infof("builder validate completed")
 	return nil
 }
 
-func (b *BuilderController) Run() error {
-	err := b.Login()
-	if err != nil {
+func (b *BuildController) Run() error {
+	if err := b.Login(); err != nil {
 		return err
 	}
-	err = b.BuildAndPushImage()
-	if err != nil {
+	if err := b.BuildAndPushImage(); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (b *BuilderController) SyncBuildStatus(msg string) {
-	url := fmt.Sprintf("%s/rainbow/builds/%d/status", b.Callback, b.BuilderId)
-	err := b.httpClient.Post(url, nil, map[string]interface{}{"Status": msg}, nil)
+func (b *BuildController) SyncBuildStatus(status string) {
+	data, err := util.BuildHttpBody(map[string]interface{}{"Status": status})
 	if err != nil {
-		klog.Errorf("同步 %s 失败 %v", msg, err)
-	} else {
-		klog.Infof("同步 %s 成功", msg)
+		klog.Errorf("构造请求体失败 %v", err)
+		return
 	}
+
+	httpClient := util.HttpClientV2{URL: fmt.Sprintf("%s/rainbow/set/build/%d/status", b.Callback, b.BuildId)}
+	if err1 := httpClient.Method(http.MethodPut).
+		WithTimeout(30 * time.Second).
+		WithBody(data).
+		Do(nil); err1 != nil {
+		klog.Errorf("同步状态失败 %v", err1)
+		return
+	}
+
+	klog.Infof("同步构建(%d)状态(%s)完成", b.BuildId, status)
 }
 
-func (b *BuilderController) SyncBuildMessages(msg string) {
-	url := fmt.Sprintf("%s/rainbow/builds/%d/messages", b.Callback, b.BuilderId)
+func (b *BuildController) SyncBuildMessages(msg string) {
+	url := fmt.Sprintf("%s/rainbow/builds/%d/messages", b.Callback, b.BuildId)
 	err := b.httpClient.Post(url, nil, map[string]interface{}{"message": msg}, nil)
 	if err != nil {
 		klog.Errorf("同步 %s 失败 %v", msg, err)
@@ -169,12 +150,11 @@ func (b *BuilderController) SyncBuildMessages(msg string) {
 	}
 }
 
-func (b *BuilderController) runCmdAndStream(cmd exec.Cmd) error {
+func (b *BuildController) runCmdAndStream(cmd exec.Cmd) error {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
-
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return err
@@ -191,7 +171,6 @@ func (b *BuilderController) runCmdAndStream(cmd exec.Cmd) error {
 			b.SyncBuildMessages(scanner.Text())
 		}
 	}
-
 	go readPipe(stdout)
 	go readPipe(stderr)
 

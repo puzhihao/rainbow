@@ -47,9 +47,10 @@ type Config struct {
 
 	Rocketmq RocketmqOption `yaml:"rocketmq"`
 
-	Plugin   PluginOption  `yaml:"plugin"`
-	Builder  BuilderOption `yaml:"builder"`
-	Registry Registry      `yaml:"registry"`
+	Plugin   PluginOption `yaml:"plugin"`
+	Registry Registry     `yaml:"registry"`
+
+	Build *BuildOption `yaml:"build,omitempty"`
 
 	Agent AgentOption `yaml:"agent"`
 
@@ -128,12 +129,11 @@ type PluginOption struct {
 	Arch       string `yaml:"arch"`
 }
 
-type BuilderOption struct {
-	Callback   string `yaml:"callback"`
-	BuilderId  int64  `yaml:"builder_id"`
-	RegistryId int64  `yaml:"registry_id"`
-	Arch       string `yaml:"arch"`
-	Repo       string `yaml:"repo"`
+type BuildOption struct {
+	Callback string `yaml:"callback"`
+	BuildId  int64  `yaml:"build_id"`
+	Arch     string `yaml:"arch"`
+	Repo     string `yaml:"repo"`
 }
 
 type Registry struct {
