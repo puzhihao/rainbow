@@ -17,11 +17,11 @@ import (
 )
 
 type BuildController struct {
-	Callback   string
-	BuildId    int64
-	DockerFile string
-	Repo       string
-	Arch       string
+	Callback       string
+	BuildId        int64
+	DockerfilePath string
+	Repo           string
+	Arch           string
 
 	httpClient util.HttpInterface
 	exec       exec.Interface
@@ -46,12 +46,13 @@ func (b *BuildController) Login() error {
 
 func NewBuilderController(cfg config.Config) *BuildController {
 	return &BuildController{
-		Cfg:        cfg,
-		Callback:   cfg.Build.Callback,
-		BuildId:    cfg.Build.BuildId,
-		Repo:       cfg.Build.Repo,
-		Arch:       cfg.Build.Arch,
-		httpClient: util.NewHttpClient(5*time.Second, cfg.Build.Callback),
+		Cfg:            cfg,
+		Callback:       cfg.Build.Callback,
+		BuildId:        cfg.Build.BuildId,
+		Repo:           cfg.Build.Repo,
+		Arch:           cfg.Build.Arch,
+		DockerfilePath: cfg.Build.DockerfilePath,
+		httpClient:     util.NewHttpClient(5*time.Second, cfg.Build.Callback),
 	}
 }
 
@@ -90,7 +91,7 @@ func (b *BuildController) BuildAndPushImage() error {
 	b.SyncBuildStatus("开始构建上传镜像")
 	klog.Infof("Starting build image %s", imageName)
 
-	buildAndPushCmd := b.exec.Command("docker", "buildx", "build", "--platform", b.Arch, "-t", imageName, "--push", ".")
+	buildAndPushCmd := b.exec.Command("docker", "buildx", "build", "--platform", b.Arch, "-f", b.DockerfilePath, "-t", imageName, "--push", ".")
 	if err := b.runCmdAndStream(buildAndPushCmd); err != nil {
 		b.SyncBuildStatus("镜像构建上传失败")
 		return fmt.Errorf("failed to build and push image: %w", err)
