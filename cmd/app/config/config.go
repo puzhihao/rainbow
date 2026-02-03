@@ -130,10 +130,11 @@ type PluginOption struct {
 }
 
 type BuildOption struct {
-	Callback string `yaml:"callback"`
-	BuildId  int64  `yaml:"build_id"`
-	Arch     string `yaml:"arch"`
-	Repo     string `yaml:"repo"`
+	Callback       string `yaml:"callback"`
+	BuildId        int64  `yaml:"build_id"`
+	Arch           string `yaml:"arch"`
+	Repo           string `yaml:"repo"`
+	DockerfilePath string `yaml:"dockerfile_path"`
 }
 
 type Registry struct {
