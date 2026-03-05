@@ -2,13 +2,50 @@ package rainbow
 
 import (
 	"context"
-	"github.com/caoyingjunz/rainbow/pkg/db"
-	"github.com/caoyingjunz/rainbow/pkg/types"
+	"time"
+
 	"k8s.io/klog/v2"
+
+	"github.com/caoyingjunz/rainbow/pkg/db"
+	"github.com/caoyingjunz/rainbow/pkg/db/model"
+	"github.com/caoyingjunz/rainbow/pkg/types"
 )
 
+func (s *ServerController) syncMetrics(ctx context.Context) {
+	now := time.Now()
+
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterdayStart := todayStart.AddDate(0, 0, -1)
+
+	recordDay := yesterdayStart.Format("2006-01-02")
+
+	pullCount, err := s.factory.Image().PullAllCount(ctx)
+	if err != nil {
+		klog.Errorf("获取 pull count 失败 %v", err)
+		return
+	}
+	taskCount, err := s.factory.Task().Count(ctx)
+	if err != nil {
+		klog.Errorf("获取日活任务失败 %v", err)
+		return
+	}
+	imageCount, err := s.factory.Image().Count(ctx)
+	if err != nil {
+		klog.Errorf("获取镜像数失败 %v", err)
+		return
+	}
+	tagCount, err := s.factory.Image().TagCount(ctx)
+	if err != nil {
+		return
+	}
+	_, err = s.factory.Metrics().Create(ctx, &model.Metrics{Pull: pullCount, Task: taskCount, Image: imageCount, RecordDay: recordDay, Tags: tagCount})
+	if err != nil {
+		klog.Errorf("创建日活数据失败 %v", err)
+		return
+	}
+}
+
 func (s *ServerController) ListMetrics(ctx context.Context, listOption types.ListOptions) (interface{}, error) {
-	// 初始化分页属性
 	listOption.SetDefaultPageOption()
 
 	pageResult := types.PageResult{
