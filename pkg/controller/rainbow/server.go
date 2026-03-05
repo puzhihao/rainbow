@@ -180,6 +180,8 @@ type ServerInterface interface {
 	ListBuildMessages(ctx context.Context, buildId int64) (interface{}, error)
 	UpdateBuildStatus(ctx context.Context, req *types.UpdateBuildStatusRequest) error
 
+	ListMetrics(ctx context.Context, listOption types.ListOptions) (interface{}, error)
+
 	Run(ctx context.Context, workers int) error
 	Stop(ctx context.Context)
 }
