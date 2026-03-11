@@ -10,17 +10,19 @@ import (
 
 	"github.com/spf13/cobra"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/klog/v2"
 	cmdutil "k8s.io/kubectl/pkg/cmd/util"
 
 	"github.com/caoyingjunz/rainbow/pkg/db/model"
 	"github.com/caoyingjunz/rainbow/pkg/pixiuctl/config"
+	"github.com/caoyingjunz/rainbow/pkg/types"
 	"github.com/caoyingjunz/rainbow/pkg/util"
 	"github.com/caoyingjunz/rainbow/pkg/util/docker"
 	"github.com/caoyingjunz/rainbow/pkg/util/signatureutil"
 )
 
 const (
-	baseURL = "http://127.0.0.1:8090"
+	baseURL = "http://peng:8090"
 )
 
 type RepoResult struct {
@@ -34,15 +36,25 @@ type TaskResult struct {
 	Message string `json:"message,omitempty"`
 }
 
+type UserResult struct {
+	Code    int        `json:"code"`
+	Result  model.User `json:"result"`
+	Message string     `json:"message,omitempty"`
+}
+
 type PullOptions struct {
-	baseURL   string
+	baseURL string
+	cfg     *config.Config
+
+	accessKey string
 	signature string
-	cfg       *config.Config
 
 	// flag
 	Platform string
 
 	Repos []string
+
+	user *model.User
 }
 
 func NewPullCommand() *cobra.Command {
@@ -103,11 +115,12 @@ func (o *PullOptions) Validate(cmd *cobra.Command, args []string) error {
 }
 
 func (o *PullOptions) Run() error {
-	// 完成客户端证书
-	o.signature = signatureutil.GenerateSignature(
-		map[string]string{"action": "pullOrCacheRepo", "accessKey": o.cfg.Auth.AccessKey},
-		[]byte(o.cfg.Auth.SecretKey))
+	// 运行前初始化必要属性
+	if err := o.preRun(); err != nil {
+		return err
+	}
 
+	// 执行
 	diff := len(o.Repos)
 	errCh := make(chan error, diff)
 
@@ -132,6 +145,25 @@ func (o *PullOptions) Run() error {
 	return utilerrors.NewAggregate(errs)
 }
 
+func (o *PullOptions) preRun() error {
+	o.accessKey = o.cfg.Auth.AccessKey
+	// 完成客户端证书
+	o.signature = signatureutil.GenerateSignature(
+		map[string]string{
+			"action":    "pullOrCacheRepo",
+			"accessKey": o.accessKey},
+		[]byte(o.cfg.Auth.SecretKey))
+
+	// 初始化用户信息
+	var err error
+	o.user, err = o.getUserInfoByAccessKey()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // SearchRepo 搜索镜像是否存在缓存，如果存在，则直接 pull，如果不存在则先构成缓存，然后再pull，最后进行tag
 func (o *PullOptions) pullAndCacheOne(repo string) error {
 	// TODO
@@ -150,14 +182,35 @@ func (o *PullOptions) pullAndCacheOne(repo string) error {
 }
 
 func (o *PullOptions) SearchRepo(repo string) (*model.Tag, error) {
-	url := fmt.Sprintf("%s/api/v2/search/repos?nameSelector=%s&arch=%s", o.baseURL, repo, o.Platform)
+	url := fmt.Sprintf("%s/api/v2/search/repos?nameSelector=%s&arch=%s&user_id=%s", o.baseURL, repo, o.Platform, o.user.UserId)
 
 	var result RepoResult
 	httpClient := util.HttpClientV2{URL: url}
 	if err := httpClient.Method(http.MethodGet).
 		WithTimeout(5 * time.Second).
 		WithHeader(map[string]string{
-			"X-ACCESS-KEY":  o.cfg.Auth.AccessKey,
+			"X-ACCESS-KEY":  o.accessKey,
+			"Authorization": o.signature,
+		}).
+		Do(&result); err != nil {
+		return nil, err
+	}
+	if result.Code == 200 {
+		return &result.Result, nil
+	}
+
+	return nil, fmt.Errorf("%s", result.Message)
+}
+
+func (o *PullOptions) getUserInfoByAccessKey() (*model.User, error) {
+	url := fmt.Sprintf("%s/api/v2/users?access_key=%s", o.baseURL, o.cfg.Auth.AccessKey)
+
+	var result UserResult
+	httpClient := util.HttpClientV2{URL: url}
+	if err := httpClient.Method(http.MethodGet).
+		WithTimeout(5 * time.Second).
+		WithHeader(map[string]string{
+			"X-ACCESS-KEY":  o.accessKey,
 			"Authorization": o.signature,
 		}).
 		Do(&result); err != nil {
@@ -192,6 +245,7 @@ func (o *PullOptions) cacheAndPull(repo string) error {
 		return err
 	}
 
+	klog.Infof("缓存构建完成")
 	return o.pull(cache)
 }
 
@@ -200,6 +254,9 @@ func (o *PullOptions) buildCache(repo string) error {
 		"name":         "PixiuHub-" + repo + "-加速",
 		"architecture": o.Platform,
 		"images":       []string{repo},
+		"user_id":      o.user.UserId,
+		"user_name":    o.user.Name,
+		"public_image": true,
 	})
 	if err1 != nil {
 		return err1
@@ -210,18 +267,46 @@ func (o *PullOptions) buildCache(repo string) error {
 	httpClient := util.HttpClientV2{URL: url}
 	if err := httpClient.Method(http.MethodPost).
 		WithTimeout(5 * time.Second).
-		WithHeader(map[string]string{"X-ACCESS-KEY": o.cfg.Auth.AccessKey, "Authorization": o.signature}).
+		WithHeader(map[string]string{"X-ACCESS-KEY": o.accessKey, "Authorization": o.signature}).
 		WithBody(bytes.NewBuffer(data)).
 		Do(&result); err != nil {
 		return err
 	}
 	if result.Code == 200 {
+		klog.Infof("镜像缓存构建中，请稍等")
 		return nil
 	}
 	return fmt.Errorf("%s", result.Message)
 }
 
 func (o *PullOptions) waitForCached(repo string) (*model.Tag, error) {
+	// 创建一个计时器用于超时控制
+	timeoutTimer := time.NewTimer(10 * time.Minute)
+	defer timeoutTimer.Stop()
 
-	return nil, nil
+	// 创建一个 ticker 用于定期轮询
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeoutTimer.C:
+			// 超时退出
+			return nil, fmt.Errorf("构建(%s)缓存已超时，请稍后再试或调整超时时间再试", repo)
+		case <-ticker.C:
+			// 执行轮询：获取镜像当前状态
+			cacheTag, err := o.SearchRepo(repo)
+			if err != nil {
+				klog.V(1).Infof("获取构建失败(%v)，等待下一次查询", err)
+				continue
+			}
+
+			if cacheTag.Status == types.SyncImageComplete {
+				return cacheTag, nil
+			}
+			if cacheTag.Status == types.SyncImageError {
+				return nil, fmt.Errorf("缓存构建失败，更多信息参考 https://hub.pixiuio.com/")
+			}
+		}
+	}
 }
