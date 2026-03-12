@@ -19,7 +19,7 @@ type AuthConfig struct {
 }
 
 type DefaultConfig struct {
-	URL     string `yaml:"url"`
+	URL     string `yaml:"url,omitempty"`
 	Timeout int    `yaml:"timeout"` // 单位是分钟
 }
 
@@ -39,4 +39,18 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+func SaveConfig(path string, cfg *Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+
+	// 确保文件存在时被覆盖
+	if err := ioutil.WriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+
+	return nil
 }
