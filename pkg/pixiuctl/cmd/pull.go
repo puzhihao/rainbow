@@ -22,10 +22,6 @@ import (
 	"github.com/caoyingjunz/rainbow/pkg/util/signatureutil"
 )
 
-const (
-	baseURL = "http://peng:8090"
-)
-
 type RepoResult struct {
 	Code    int       `json:"code"`
 	Result  model.Tag `json:"result,omitempty"`
@@ -70,8 +66,11 @@ func NewPullCommand() *cobra.Command {
 		Use:   "pull [image]",
 		Short: "Pull and cache images from PixiuHub(https://hub.pixiuio.com)",
 		Long:  `Pull and cache images from PixiuHub(https://hub.pixiuio.com) to local storage.`,
-		//Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
+			if len(args) == 0 {
+				_ = cmd.Help()
+				return
+			}
 			cmdutil.CheckErr(o.Complete(cmd, args))
 			cmdutil.CheckErr(o.Validate(cmd, args))
 			cmdutil.CheckErr(o.Run())
@@ -79,7 +78,7 @@ func NewPullCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&o.Platform, "platform", "linux/amd64", "Platform for the image (e.g. linux/amd64, linux/arm64)")
-	cmd.Flags().BoolVar(&o.Rewrite, "rewrite", false, "Rewrite mode")
+	cmd.Flags().BoolVar(&o.Rewrite, "rewrite", false, "Rewrite the repo even if it exists")
 
 	return cmd
 }
@@ -168,7 +167,7 @@ func (o *PullOptions) preRun() error {
 
 	// 初始化用户信息
 	var err error
-	o.user, err = o.getUserInfoByAccessKey()
+	o.user, err = GetUserInfoByAccessKey(o.baseURL, o.accessKey, o.signature)
 	if err != nil {
 		return err
 	}
@@ -208,27 +207,6 @@ func (o *PullOptions) SearchRepo(repo string) (*model.Tag, error) {
 	url := fmt.Sprintf("%s/api/v2/search/repos?nameSelector=%s&arch=%s&user_id=%s", o.baseURL, repo, o.Platform, o.user.UserId)
 
 	var result RepoResult
-	httpClient := util.HttpClientV2{URL: url}
-	if err := httpClient.Method(http.MethodGet).
-		WithTimeout(5 * time.Second).
-		WithHeader(map[string]string{
-			"X-ACCESS-KEY":  o.accessKey,
-			"Authorization": o.signature,
-		}).
-		Do(&result); err != nil {
-		return nil, err
-	}
-	if result.Code == 200 {
-		return &result.Result, nil
-	}
-
-	return nil, fmt.Errorf("%s", result.Message)
-}
-
-func (o *PullOptions) getUserInfoByAccessKey() (*model.User, error) {
-	url := fmt.Sprintf("%s/api/v2/users?access_key=%s", o.baseURL, o.cfg.Auth.AccessKey)
-
-	var result UserResult
 	httpClient := util.HttpClientV2{URL: url}
 	if err := httpClient.Method(http.MethodGet).
 		WithTimeout(5 * time.Second).

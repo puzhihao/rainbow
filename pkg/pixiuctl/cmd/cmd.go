@@ -10,6 +10,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	baseURL = "http://peng:8090"
+)
+
 func NewDefaultPixiuCtlCommand() *cobra.Command {
 	return NewPixiuCtlCommand(os.Stdin, os.Stdout, os.Stderr)
 }
@@ -28,6 +32,7 @@ Find more information at: https://hub.pixiuio.com`,
 
 	// Add subcommands
 	cmd.AddCommand(NewPullCommand())
+	cmd.AddCommand(NewRegisterCommand())
 	cmd.AddCommand(NewConfigCommand())
 	cmd.AddCommand(NewVersionCommand())
 
