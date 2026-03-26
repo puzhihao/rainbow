@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -497,4 +499,72 @@ func (s *ServerController) extractToken(c *gin.Context) (string, error) {
 	//}
 	//
 	//return fields[1], nil
+}
+
+var pixiuCtlBinaryNamePattern = regexp.MustCompile(`^pixiuctl-[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+$`)
+
+func (s *ServerController) DownloadPixiuctl(ctx *gin.Context, version, filename string) (string, error) {
+	if version == "." || version == "" {
+		return "", fmt.Errorf("invalid version")
+	}
+	if !pixiuCtlBinaryNamePattern.MatchString(filename) {
+		return "", fmt.Errorf("invalid filename, expected pixiuctl-<os>-<arch>")
+	}
+
+	fullPath := filepath.Join(s.cfg.Server.DownloadDir, version, filename)
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("pixiuctl file not found")
+		}
+		return "", fmt.Errorf("stat file failed: %v", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("invalid pixiuctl path")
+	}
+
+	return fullPath, nil
+}
+
+func (s *ServerController) ListPixiuctls(ctx *gin.Context) ([]types.PixiuctlDownloadItem, error) {
+	entries, err := os.ReadDir(s.cfg.Server.DownloadDir)
+	if err != nil {
+		return nil, fmt.Errorf("read pixiuctl dir failed: %v", err)
+	}
+
+	var versions []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			versions = append(versions, entry.Name())
+		}
+	}
+	sort.Strings(versions)
+
+	result := make([]types.PixiuctlDownloadItem, 0, len(versions))
+	for _, version := range versions {
+		versionDir := filepath.Join(s.cfg.Server.DownloadDir, version)
+		files, err := os.ReadDir(versionDir)
+		if err != nil {
+			return nil, fmt.Errorf("read version dir %s failed: %v", version, err)
+		}
+
+		var items []string
+		for _, file := range files {
+			if file.IsDir() {
+				continue
+			}
+			if !pixiuCtlBinaryNamePattern.MatchString(file.Name()) {
+				continue
+			}
+			items = append(items, file.Name())
+		}
+		sort.Strings(items)
+
+		result = append(result, types.PixiuctlDownloadItem{
+			Version: version,
+			Items:   items,
+		})
+	}
+
+	return result, nil
 }

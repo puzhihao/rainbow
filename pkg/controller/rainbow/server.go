@@ -193,6 +193,9 @@ type ServerInterface interface {
 
 	SearchRepo(ctx *gin.Context, listOption types.ListOptions) (interface{}, error)
 
+	DownloadPixiuctl(ctx *gin.Context, version, filename string) (string, error)
+	ListPixiuctls(ctx *gin.Context) ([]types.PixiuctlDownloadItem, error)
+
 	Run(ctx context.Context, workers int) error
 	Stop(ctx context.Context)
 }
@@ -357,8 +360,8 @@ func (s *ServerController) IsRainbowReachable(sshConfig *sshutil.SSHConfig, node
 }
 
 func (s *ServerController) Stop(ctx context.Context) {
-	klog.Infof("rocketmq producer 停止服务!!!")
-	_ = s.Producer.Shutdown()
+	//klog.Infof("rocketmq producer 停止服务!!!")
+	//_ = s.Producer.Shutdown()
 }
 
 func (s *ServerController) startSubscribeController(ctx context.Context) {
