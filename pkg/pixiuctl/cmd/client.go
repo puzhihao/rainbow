@@ -133,7 +133,8 @@ func (pc *PixiuHubClient) ListRegistries() ([]model.Registry, error) {
 
 func (pc *PixiuHubClient) ListImages(page, pageSize int) ([]model.Image, error) {
 	var result ImageListResult
-	url := fmt.Sprintf("%s/api/v2/images?user_id=%s&page=%d&page_size=%d", pc.baseURL, pc.userInfo.UserId, page, pageSize)
+	url := fmt.Sprintf("%s/api/v2/images?user_id=%s&page=%d&limit=%d", pc.baseURL, pc.userInfo.UserId, page, pageSize)
+	fmt.Println(url)
 	httpClient := util.HttpClientV2{URL: url}
 	if err := httpClient.Method("GET").
 		WithTimeout(5 * time.Second).
